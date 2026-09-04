@@ -1,0 +1,32 @@
+{
+  "_disclaimer": "Small, curated, illustrative dataset for demonstrating the safety-check architecture (Section 9.6 of the Taalmel design doc). NOT a comprehensive or clinically validated drug-interaction database. Do not extend this file with unreferenced entries; every rule must cite a source.",
+  "knownMedications": [
+    "Metformin",
+    "Glimepiride",
+    "Amlodipine",
+    "Losartan",
+    "Atorvastatin",
+    "Aspirin",
+    "Warfarin",
+    "Ibuprofen",
+    "Paracetamol",
+    "Omeprazole"
+  ],
+  "interactions": [
+    {
+      "a": "Warfarin",
+      "b": "Aspirin",
+      "note": "Combined use increases bleeding risk; typically requires clinician supervision.",
+      "source": "Illustrative demo entry — replace with a cited clinical reference before any real use."
+    },
+    {
+      "a": "Warfarin",
+      "b": "Ibuprofen",
+      "note": "NSAIDs combined with anticoagulants increase bleeding risk.",
+      "source": "Illustrative demo entry — replace with a cited clinical reference before any real use."
+    }
+  ],
+  "duplicateIngredientGroups": [
+    ["Paracetamol", "Paracetamol"]
+  ]
+}

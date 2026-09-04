@@ -1,0 +1,378 @@
+{
+  "_disclaimer": "Curated reference dataset for medication normalization (Phase 3). Covers commonly prescribed medications in Indian chronic-disease care. NOT a comprehensive pharmaceutical database. Every entry should be verified before any clinical use. This is an illustrative demo dataset.",
+  "medications": [
+    {
+      "genericName": "Metformin",
+      "brandNames": ["Glucophage", "Glycomet", "Obimet", "Gluformin", "Glyciphage"],
+      "strengths": ["250mg", "500mg", "850mg", "1000mg"],
+      "dosageForms": ["tablet", "extended-release tablet"],
+      "activeIngredient": "Metformin Hydrochloride",
+      "category": "Antidiabetic"
+    },
+    {
+      "genericName": "Glimepiride",
+      "brandNames": ["Amaryl", "Glimisave", "Glimy"],
+      "strengths": ["1mg", "2mg", "3mg", "4mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Glimepiride",
+      "category": "Antidiabetic"
+    },
+    {
+      "genericName": "Amlodipine",
+      "brandNames": ["Norvasc", "Amlong", "Amlip", "Amlopin", "Stamlo"],
+      "strengths": ["2.5mg", "5mg", "10mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Amlodipine Besylate",
+      "category": "Antihypertensive"
+    },
+    {
+      "genericName": "Losartan",
+      "brandNames": ["Cozaar", "Losar", "Losacar", "Repace"],
+      "strengths": ["25mg", "50mg", "100mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Losartan Potassium",
+      "category": "Antihypertensive"
+    },
+    {
+      "genericName": "Atorvastatin",
+      "brandNames": ["Lipitor", "Atorva", "Tonact", "Storvas", "Atocor"],
+      "strengths": ["10mg", "20mg", "40mg", "80mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Atorvastatin Calcium",
+      "category": "Lipid-lowering"
+    },
+    {
+      "genericName": "Aspirin",
+      "brandNames": ["Ecosprin", "Disprin", "Aspicot"],
+      "strengths": ["75mg", "150mg", "325mg"],
+      "dosageForms": ["tablet", "enteric-coated tablet"],
+      "activeIngredient": "Acetylsalicylic Acid",
+      "category": "Antiplatelet"
+    },
+    {
+      "genericName": "Paracetamol",
+      "brandNames": ["Crocin", "Dolo", "Calpol", "Pacimol", "Tylenol"],
+      "strengths": ["325mg", "500mg", "650mg", "1000mg"],
+      "dosageForms": ["tablet", "syrup", "suspension"],
+      "activeIngredient": "Paracetamol",
+      "category": "Analgesic/Antipyretic"
+    },
+    {
+      "genericName": "Ibuprofen",
+      "brandNames": ["Brufen", "Ibugesic", "Combiflam"],
+      "strengths": ["200mg", "400mg", "600mg"],
+      "dosageForms": ["tablet", "suspension"],
+      "activeIngredient": "Ibuprofen",
+      "category": "NSAID"
+    },
+    {
+      "genericName": "Omeprazole",
+      "brandNames": ["Omez", "Ocid", "Nilsec"],
+      "strengths": ["10mg", "20mg", "40mg"],
+      "dosageForms": ["capsule", "tablet"],
+      "activeIngredient": "Omeprazole",
+      "category": "Proton Pump Inhibitor"
+    },
+    {
+      "genericName": "Pantoprazole",
+      "brandNames": ["Pan", "Pantop", "Pantocid", "Nupenta"],
+      "strengths": ["20mg", "40mg"],
+      "dosageForms": ["tablet", "injection"],
+      "activeIngredient": "Pantoprazole Sodium",
+      "category": "Proton Pump Inhibitor"
+    },
+    {
+      "genericName": "Telmisartan",
+      "brandNames": ["Telma", "Telmikind", "Telvas", "Sartel"],
+      "strengths": ["20mg", "40mg", "80mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Telmisartan",
+      "category": "Antihypertensive"
+    },
+    {
+      "genericName": "Ramipril",
+      "brandNames": ["Cardace", "Ramistar", "Hopace"],
+      "strengths": ["1.25mg", "2.5mg", "5mg", "10mg"],
+      "dosageForms": ["tablet", "capsule"],
+      "activeIngredient": "Ramipril",
+      "category": "ACE Inhibitor"
+    },
+    {
+      "genericName": "Enalapril",
+      "brandNames": ["Envas", "Enam", "Enacard"],
+      "strengths": ["2.5mg", "5mg", "10mg", "20mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Enalapril Maleate",
+      "category": "ACE Inhibitor"
+    },
+    {
+      "genericName": "Clopidogrel",
+      "brandNames": ["Clopilet", "Plavix", "Clopitab", "Deplatt"],
+      "strengths": ["75mg", "150mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Clopidogrel Bisulfate",
+      "category": "Antiplatelet"
+    },
+    {
+      "genericName": "Warfarin",
+      "brandNames": ["Warf", "Uniwarfin"],
+      "strengths": ["1mg", "2mg", "5mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Warfarin Sodium",
+      "category": "Anticoagulant"
+    },
+    {
+      "genericName": "Rosuvastatin",
+      "brandNames": ["Crestor", "Rosuvas", "Rozavel", "Rosulip"],
+      "strengths": ["5mg", "10mg", "20mg", "40mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Rosuvastatin Calcium",
+      "category": "Lipid-lowering"
+    },
+    {
+      "genericName": "Insulin Glargine",
+      "brandNames": ["Lantus", "Basalog", "Glaritus"],
+      "strengths": ["100iu/ml"],
+      "dosageForms": ["injection", "pen"],
+      "activeIngredient": "Insulin Glargine",
+      "category": "Antidiabetic"
+    },
+    {
+      "genericName": "Levothyroxine",
+      "brandNames": ["Thyronorm", "Eltroxin", "Thyrox"],
+      "strengths": ["12.5mcg", "25mcg", "50mcg", "75mcg", "100mcg", "125mcg", "150mcg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Levothyroxine Sodium",
+      "category": "Thyroid Hormone"
+    },
+    {
+      "genericName": "Hydrochlorothiazide",
+      "brandNames": ["Aquazide", "Hydrazide"],
+      "strengths": ["12.5mg", "25mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Hydrochlorothiazide",
+      "category": "Diuretic"
+    },
+    {
+      "genericName": "Furosemide",
+      "brandNames": ["Lasix", "Frusenex", "Frusemide"],
+      "strengths": ["20mg", "40mg", "80mg"],
+      "dosageForms": ["tablet", "injection"],
+      "activeIngredient": "Furosemide",
+      "category": "Diuretic"
+    },
+    {
+      "genericName": "Ciprofloxacin",
+      "brandNames": ["Ciplox", "Cifran"],
+      "strengths": ["250mg", "500mg", "750mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Ciprofloxacin Hydrochloride",
+      "category": "Antibiotic"
+    },
+    {
+      "genericName": "Azithromycin",
+      "brandNames": ["Azithral", "Zithromax", "Azee"],
+      "strengths": ["250mg", "500mg"],
+      "dosageForms": ["tablet", "suspension"],
+      "activeIngredient": "Azithromycin Dihydrate",
+      "category": "Antibiotic"
+    },
+    {
+      "genericName": "Amoxicillin",
+      "brandNames": ["Mox", "Amoxil", "Novamox"],
+      "strengths": ["250mg", "500mg"],
+      "dosageForms": ["capsule", "suspension"],
+      "activeIngredient": "Amoxicillin Trihydrate",
+      "category": "Antibiotic"
+    },
+    {
+      "genericName": "Metoprolol",
+      "brandNames": ["Betaloc", "Met XL", "Seloken"],
+      "strengths": ["25mg", "50mg", "100mg"],
+      "dosageForms": ["tablet", "extended-release tablet"],
+      "activeIngredient": "Metoprolol Succinate",
+      "category": "Beta Blocker"
+    },
+    {
+      "genericName": "Atenolol",
+      "brandNames": ["Aten", "Tenormin", "Betacard"],
+      "strengths": ["25mg", "50mg", "100mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Atenolol",
+      "category": "Beta Blocker"
+    },
+    {
+      "genericName": "Digoxin",
+      "brandNames": ["Lanoxin", "Digox"],
+      "strengths": ["0.125mg", "0.25mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Digoxin",
+      "category": "Cardiac Glycoside"
+    },
+    {
+      "genericName": "Lisinopril",
+      "brandNames": ["Listril", "Lipril"],
+      "strengths": ["2.5mg", "5mg", "10mg", "20mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Lisinopril",
+      "category": "ACE Inhibitor"
+    },
+    {
+      "genericName": "Sitagliptin",
+      "brandNames": ["Januvia", "Istavel", "Zita"],
+      "strengths": ["25mg", "50mg", "100mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Sitagliptin Phosphate",
+      "category": "Antidiabetic"
+    },
+    {
+      "genericName": "Pioglitazone",
+      "brandNames": ["Pioz", "Piozone"],
+      "strengths": ["15mg", "30mg", "45mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Pioglitazone Hydrochloride",
+      "category": "Antidiabetic"
+    },
+    {
+      "genericName": "Gliclazide",
+      "brandNames": ["Diamicron", "Glizid", "Glycinorm"],
+      "strengths": ["40mg", "80mg"],
+      "dosageForms": ["tablet", "modified-release tablet"],
+      "activeIngredient": "Gliclazide",
+      "category": "Antidiabetic"
+    },
+    {
+      "genericName": "Vildagliptin",
+      "brandNames": ["Galvus", "Jalra", "Zomelis"],
+      "strengths": ["50mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Vildagliptin",
+      "category": "Antidiabetic"
+    },
+    {
+      "genericName": "Empagliflozin",
+      "brandNames": ["Jardiance", "Gibtulio"],
+      "strengths": ["10mg", "25mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Empagliflozin",
+      "category": "Antidiabetic"
+    },
+    {
+      "genericName": "Dapagliflozin",
+      "brandNames": ["Forxiga", "Oxra"],
+      "strengths": ["5mg", "10mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Dapagliflozin",
+      "category": "Antidiabetic"
+    },
+    {
+      "genericName": "Montelukast",
+      "brandNames": ["Montair", "Singulair", "Montek"],
+      "strengths": ["4mg", "5mg", "10mg"],
+      "dosageForms": ["tablet", "chewable tablet"],
+      "activeIngredient": "Montelukast Sodium",
+      "category": "Leukotriene Antagonist"
+    },
+    {
+      "genericName": "Prednisolone",
+      "brandNames": ["Omnacortil", "Wysolone"],
+      "strengths": ["5mg", "10mg", "20mg", "40mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Prednisolone",
+      "category": "Corticosteroid"
+    },
+    {
+      "genericName": "Cetirizine",
+      "brandNames": ["Cetzine", "Zyrtec", "Okacet"],
+      "strengths": ["5mg", "10mg"],
+      "dosageForms": ["tablet", "syrup"],
+      "activeIngredient": "Cetirizine Dihydrochloride",
+      "category": "Antihistamine"
+    },
+    {
+      "genericName": "Ranitidine",
+      "brandNames": ["Rantac", "Zinetac", "Aciloc"],
+      "strengths": ["150mg", "300mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Ranitidine Hydrochloride",
+      "category": "H2 Blocker"
+    },
+    {
+      "genericName": "Spironolactone",
+      "brandNames": ["Aldactone", "Spiromide"],
+      "strengths": ["25mg", "50mg", "100mg"],
+      "dosageForms": ["tablet"],
+      "activeIngredient": "Spironolactone",
+      "category": "Diuretic"
+    },
+    {
+      "genericName": "Diltiazem",
+      "brandNames": ["Dilzem", "Angizem"],
+      "strengths": ["30mg", "60mg", "90mg", "120mg"],
+      "dosageForms": ["tablet", "extended-release capsule"],
+      "activeIngredient": "Diltiazem Hydrochloride",
+      "category": "Calcium Channel Blocker"
+    },
+    {
+      "genericName": "Nifedipine",
+      "brandNames": ["Nicardia", "Calcigard", "Depin"],
+      "strengths": ["5mg", "10mg", "20mg"],
+      "dosageForms": ["capsule", "extended-release tablet"],
+      "activeIngredient": "Nifedipine",
+      "category": "Calcium Channel Blocker"
+    }
+  ],
+  "dosageFormAliases": {
+    "tab": "tablet",
+    "tabs": "tablet",
+    "tablet": "tablet",
+    "tablets": "tablet",
+    "cap": "capsule",
+    "caps": "capsule",
+    "capsule": "capsule",
+    "capsules": "capsule",
+    "syp": "syrup",
+    "syrup": "syrup",
+    "inj": "injection",
+    "injection": "injection",
+    "susp": "suspension",
+    "suspension": "suspension",
+    "sr": "sustained-release tablet",
+    "xr": "extended-release tablet",
+    "er": "extended-release tablet",
+    "mr": "modified-release tablet",
+    "cr": "controlled-release tablet",
+    "la": "long-acting",
+    "od": "once-daily tablet",
+    "ec": "enteric-coated tablet",
+    "pen": "pen",
+    "drops": "drops",
+    "oint": "ointment",
+    "cream": "cream",
+    "gel": "gel",
+    "spray": "spray",
+    "inhaler": "inhaler",
+    "patch": "patch",
+    "sachet": "sachet",
+    "chewable": "chewable tablet"
+  },
+  "strengthUnits": ["mg", "mcg", "g", "ml", "iu", "units", "meq"],
+  "strengthPattern": "(\\d+(?:\\.\\d+)?)\\s*(mg|mcg|g|ml|iu|units?|meq)(?:\\s*/\\s*(\\d+(?:\\.\\d+)?)\\s*(mg|mcg|g|ml)|(\\/(\\d+(?:\\.\\d+)?)?(mg|mcg|g|ml)))?",
+  "frequencyAliases": {
+    "od": "once daily",
+    "bd": "twice daily",
+    "bid": "twice daily",
+    "tid": "three times daily",
+    "tds": "three times daily",
+    "qid": "four times daily",
+    "qds": "four times daily",
+    "hs": "at bedtime",
+    "prn": "as needed",
+    "sos": "as needed",
+    "stat": "immediately",
+    "ac": "before meals",
+    "pc": "after meals",
+    "om": "every morning",
+    "on": "every night"
+  }
+}

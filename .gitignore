@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/*.db*
+*.db*
+data/uploads/*
+!data/uploads/.gitkeep
+scratch/
+.env
+*.log
+coverage/
+.DS_Store

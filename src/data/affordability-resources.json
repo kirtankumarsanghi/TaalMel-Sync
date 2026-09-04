@@ -1,0 +1,15 @@
+{
+  "_note": "Named, static public resources only, per Section 9.5/10 (AI must never generate affordability suggestions). Verify these are current before any real deployment.",
+  "resources": [
+    {
+      "name": "Pradhan Mantri Bhartiya Janaushadhi Pariyojana (PMBJP / Jan Aushadhi)",
+      "description": "Government scheme providing generic medicines at government-run Jan Aushadhi Kendras at lower cost than branded equivalents.",
+      "url": "https://janaushadhi.gov.in/"
+    },
+    {
+      "name": "Ayushman Bharat - PM-JAY",
+      "description": "National health protection scheme; may cover certain treatment costs for eligible households.",
+      "url": "https://pmjay.gov.in/"
+    }
+  ]
+}
