@@ -1,11 +1,19 @@
-node_modules/
-dist/
-data/*.db*
-*.db*
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Environment
+.env
+
+# Databases and uploads
+*.db
+*.db-shm
+*.db-wal
 data/uploads/*
 !data/uploads/.gitkeep
-scratch/
-.env
+
+# Logs
 *.log
-coverage/
-.DS_Store

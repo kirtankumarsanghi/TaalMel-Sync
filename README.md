@@ -1,105 +1,55 @@
-# Taalmel Sync — Backend
+# Taalmel Sync
 
-Event-sourced medication reality and follow-through backend, implementing
-the architecture from the Taalmel Health design document (v4).
+Event-sourced medication reconciliation and follow-through backend for remote caregivers.
 
 Core loop: **Prescribed → Observed → Reconciled → Why → Action → Resolved**
+
+## Stack
+
+Python 3.12 + FastAPI, SQLModel + SQLite (Postgres-ready), Alembic migrations.
+See [`backend-py/README.md`](backend-py/README.md) for the full description.
+
+> The original TypeScript prototype has been removed. It was superseded by the Python
+> implementation, which re-implements the same domain; it is available in the git history
+> if you need to refer back to it.
+
+**Verified specification and feature status:** [`SPEC.md`](SPEC.md) — every status there was
+checked against the code, not recalled. Read that before planning new work.
 
 ## Quick start
 
 ```bash
-npm install
-cp .env.example .env
-npm run seed     # walks through the exact Section 14 demo flow, prints the doctor export
-npm start        # starts the API on http://localhost:4000
+cd backend-py
+uv sync
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload     # http://127.0.0.1:8000/docs
 ```
 
 Health check: `GET /health`
 
-## Why this structure
-
-The design doc's central claim is that the *value* isn't in structuring
-prescription data — it's in reconciling multiple evidence sources,
-figuring out *why* a gap exists, and tracking that to resolution
-(Section 1's RCT finding). The code is organized to make that claim
-literally true of the architecture, not just the pitch:
-
-```
-src/
-├── events/              Section 5 — the append-only event log & its vocabulary
-│   ├── eventTypes.js       canonical event types + evidence dimensions
-│   └── eventStore.js       the ONLY write path into `events`
-├── engines/              deterministic logic (Section 10: "consistency and
-│   │                      safety matter more than generative flexibility")
-│   ├── medicationStateEngine.js   derives 4 evidence dimensions (Section 6/7)
-│   ├── conflictDetection.js       Section 8 — detects, never auto-resolves
-│   ├── reasonClassification.js    Section 9.5 — 7-category taxonomy as data
-│   ├── caseLifecycle.js           Section 9.9 — case as a tracked object
-│   └── triggerEngine.js           Section 4 — the named trigger list
-├── services/
-│   ├── doctorExportService.js     Section 9.10 / 9.14
-│   ├── auditTrailService.js       Section 9.7 / 9.8 — history + explainability
-│   ├── safetyRulesService.js      Section 9.6 — NOT_COVERED over implied SAFE
-│   ├── affordabilityService.js    Section 9.5 — named static sources only
-│   ├── normalizationService.js    Section 9.1 — brand -> generic
-│   └── ocrService.js              Section 10 — stubbed, same interface as a real model
-├── routes/                HTTP layer — thin, delegates to engines/services
-├── data/                   curated demo datasets (safety interactions, affordability)
-└── db/
-    ├── schema.sql          event-sourced schema; nothing is UPDATEd except case status
-    └── seed.js             runs the exact Section 14 demo flow end-to-end
-
-future-work/                explicitly out-of-scope items, documented with why
-  minor-symptom-guidance/     Section 9.14 — architecture-only, no clinical content
-  offline-sync/
-  patient-wellness-timeline/
-```
-
-## What's implemented vs. stubbed
-
-| Area | Status |
-|---|---|
-| Event-sourced data model (Section 5) | Fully implemented |
-| 4-dimension evidence model + freshness (Sections 6/7) | Fully implemented |
-| Conflict detection workflow (Section 8) | Fully implemented |
-| 7-category reason classification (Section 9.5) | Fully implemented |
-| Case lifecycle / resolution tracking (Section 9.9) | Fully implemented |
-| Trigger engine (Section 4) | Fully implemented |
-| Audit trail & provenance (Sections 9.7/9.8) | Fully implemented |
-| Doctor export & minimal info card (Sections 9.10/9.14) | Fully implemented |
-| Visit-to-visit companion loop (Section 9.13) | Fully implemented |
-| Safety rules layer (Section 9.6) | Implemented against a small curated demo dataset only — see `src/data/safety-interactions.json`'s disclaimer |
-| OCR extraction (Section 10) | Stubbed — same interface a real vision-model call would use, returns manual-entry fallback |
-| Per-medicine AI explanation (Section 9.13) | Stubbed template — wire a real LLM call in `dashboardRoutes.js`, keeping `originalInstruction` and `plainLanguage` as separate fields |
-| Minor Symptom Guidance (Section 9.14) | NOT implemented — architecture-only doc in `future-work/`, per the design doc's own scope constraint |
-
-## Demo script for faculty
-
-`npm run seed` runs the exact walkthrough from **Section 14** of the design
-doc: upload → dose change → patient reports stopped → caregiver finds it
-still available → conflict auto-detected → reason recorded (pharmacy
-shortage) → caregiver notified → resolved → doctor export generated. Console
-output narrates each step and prints the final structured doctor export as
-JSON, which is the artifact meant to demonstrate "reconciliation with
-follow-through," not just OCR-and-display.
-
 ## Testing
 
 ```bash
-npm test
+cd backend-py
+uv run pytest
 ```
 
-Covers the state engine, conflict detection (including the "no conflict once
-discontinuation is confirmed" case), and the case lifecycle's resolve-once
-guarantee.
+The end-to-end core-loop scenario is `backend-py/tests/test_scenario_phase1.py`.
 
-## Notes for extending this
+## Scope
 
-- **Never write to `events` except through `eventStore.appendEvent`.** That's
-  what keeps the audit trail (9.7/9.8) a property of the data model instead
-  of something you have to remember to keep in sync.
-- **Never let the state engine or conflict detector mutate anything.** They
-  should stay pure reads over the event log; only `caseLifecycle.js` and
-  `eventStore.js` write.
-- **Never let `safetyRulesService` imply an untested medicine is safe.**
-  Uncovered pairs must return `NOT_COVERED`, not be silently skipped.
+The `future-work/` directory documents items that are deliberately **not** built and why —
+most importantly minor-symptom guidance, which requires professional review of its clinical
+content before any of it can ship.
+
+## Non-negotiable design rules
+
+- **Never write to `events` except through the event store.** That is what makes the audit
+  trail a property of the data model rather than something to remember.
+- **The state engine and conflict detector stay pure.** They read; they never mutate.
+- **Never imply an untested medicine is safe.** Uncovered medicines must return
+  `NOT_COVERED`, never be silently treated as fine.
+- **Never generate medical content.** The system decides workflow; a human or an official
+  source decides what the medical text says.
+- **Nothing is silently dropped.** A failure is recorded and surfaced; a case stays open
+  until someone resolves it.

@@ -1,0 +1,42 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Postgres is provided below; switch the URL to use it. SQLite also works for a
+      # single-container demo if you drop the db service.
+      TAALMEL_DATABASE_URL: postgresql+psycopg://taalmel:taalmel@db:5432/taalmel
+      TAALMEL_REDIS_URL: redis://redis:6379
+      # Replace before any real deployment.
+      TAALMEL_JWT_SECRET: change-me-in-production
+      TAALMEL_OCR_INLINE: "false"
+    depends_on:
+      - db
+      - redis
+
+  worker:
+    build: .
+    command: ["uv", "run", "arq", "app.jobs.worker.WorkerSettings"]
+    environment:
+      TAALMEL_DATABASE_URL: postgresql+psycopg://taalmel:taalmel@db:5432/taalmel
+      TAALMEL_REDIS_URL: redis://redis:6379
+      TAALMEL_JWT_SECRET: change-me-in-production
+    depends_on:
+      - db
+      - redis
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: taalmel
+      POSTGRES_PASSWORD: taalmel
+      POSTGRES_DB: taalmel
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+
+volumes:
+  pgdata:
