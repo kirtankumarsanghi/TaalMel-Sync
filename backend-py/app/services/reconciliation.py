@@ -73,7 +73,7 @@ def _open_new_cases(
     session: Session,
     med: Medication,
     result: DetectionResult,
-    user_id: str,
+    user_id: str | None,
 ) -> list[Case]:
     already_open = _open_conflict_types(session, med.id)
     opened: list[Case] = []
@@ -94,7 +94,7 @@ def _open_new_cases(
 
 
 def _open_case_for(
-    session: Session, medication_id: str, conflict: DetectedConflict, user_id: str
+    session: Session, medication_id: str, conflict: DetectedConflict, user_id: str | None
 ) -> Case:
     description = conflict.description
     event = events.append_event(
@@ -242,19 +242,37 @@ def _close_triggering_conflict(session: Session, case: Case, now: datetime) -> N
     session.add(row)
 
 
-def open_cases_for_member(session: Session, *, user_id: str, household_member_id: str) -> list[Case]:
+def close_conflict_for_case(session: Session, case: Case, now: datetime | None = None) -> None:
+    """Public wrapper used when a case is closed outside resolve_case (e.g. a reason)."""
+    _close_triggering_conflict(session, case, now or datetime.now(UTC))
+
+
+def open_cases_for_member(
+    session: Session, *, user_id: str, household_member_id: str
+) -> list[tuple[Case, str, str | None]]:
+    """Open cases with the medicine name and a one-line issue, so a list is readable."""
     authorize_member(session, user_id, household_member_id)
-    return list(
-        session.exec(
-            select(Case)
-            .join(Medication, Case.medication_id == Medication.id)  # type: ignore[arg-type]
-            .where(
-                Medication.household_member_id == household_member_id,
-                Case.status.in_([s.value for s in OPEN_STATUSES]),  # type: ignore[attr-defined]
-            )
-            .order_by(Case.opened_at.desc())  # type: ignore[union-attr]
-        ).all()
-    )
+    rows = session.exec(
+        select(Case)
+        .join(Medication, Case.medication_id == Medication.id)  # type: ignore[arg-type]
+        .where(
+            Medication.household_member_id == household_member_id,
+            Case.status.in_([s.value for s in OPEN_STATUSES]),  # type: ignore[attr-defined]
+        )
+        .order_by(Case.opened_at.desc())  # type: ignore[union-attr]
+    ).all()
+
+    named: list[tuple[Case, str, str | None]] = []
+    for case in rows:
+        med = session.get(Medication, case.medication_id)
+        label = (med.name_generic or med.name_raw) if med else "Unknown medicine"
+        issue: str | None = None
+        if case.trigger_event_id:
+            trigger = session.get(Event, case.trigger_event_id)
+            if trigger is not None:
+                issue = events.decode_payload(trigger).get("description")
+        named.append((case, label, issue))
+    return named
 
 
 

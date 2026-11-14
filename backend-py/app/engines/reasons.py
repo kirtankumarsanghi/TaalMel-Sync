@@ -52,7 +52,7 @@ POLICY: dict[ReasonCode, ReasonPolicy] = {
     ReasonCode.FORGOT: ReasonPolicy(
         action=ReasonAction.INCREASE_REMINDERS,
         description="Increase reminder frequency and share reminders with the caregiver.",
-        closes_case=True,
+        closes_case=False,
     ),
     ReasonCode.COULD_NOT_AFFORD: ReasonPolicy(
         action=ReasonAction.SHOW_AFFORDABILITY_RESOURCES,
@@ -64,8 +64,8 @@ POLICY: dict[ReasonCode, ReasonPolicy] = {
     ),
     ReasonCode.DOCTOR_TOLD_TO_STOP: ReasonPolicy(
         action=ReasonAction.MARK_DISCONTINUED_CONFIRMED,
-        description="Record a confirmed discontinuation and close the case.",
-        closes_case=True,
+        description="Record a confirmed discontinuation; case stays open until a human confirms resolution.",
+        closes_case=False,
     ),
     ReasonCode.SIDE_EFFECT: ReasonPolicy(
         action=ReasonAction.ROUTE_TO_PROFESSIONAL_FOLLOWUP,

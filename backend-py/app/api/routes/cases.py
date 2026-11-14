@@ -29,6 +29,9 @@ class RepeatedReasonOut(BaseModel):
 class CaseOut(BaseModel):
     id: str
     medication_id: str
+    medication_name: str | None = None
+    # One line describing what disagreed, so a list of cases is readable at a glance.
+    issue: str | None = None
     trigger_event_id: str | None
     status: str
     action_taken: str | None
@@ -60,10 +63,12 @@ class ResolveIn(BaseModel):
     resolution_note: str | None = Field(default=None, max_length=500)
 
 
-def _out(case: Case) -> CaseOut:
+def _out(case: Case, medication_name: str | None = None, issue: str | None = None) -> CaseOut:
     return CaseOut(
         id=case.id,
         medication_id=case.medication_id,
+        medication_name=medication_name,
+        issue=issue,
         trigger_event_id=case.trigger_event_id,
         status=case.status,
         action_taken=case.action_taken,
@@ -93,7 +98,7 @@ def open_cases(
     cases = service.open_cases_for_member(
         session, user_id=user_id, household_member_id=household_member_id
     )
-    return [_out(c) for c in cases]
+    return [_out(case, name, issue) for case, name, issue in cases]
 
 
 @router.post("/cases/{case_id}/action", response_model=CaseOut)

@@ -15,14 +15,15 @@ export default function Onboarding() {
   const { user, signOut } = useAuth();
   const [householdName, setHouseholdName] = useState("My family");
   const [patientName, setPatientName] = useState("");
+  const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (patientName.trim().length < 2) return;
+    if (patientName.trim().length < 2 || !consent) return;
     setBusy(true);
     try {
-      await createHousehold(householdName.trim() || "My family", patientName.trim());
+      await createHousehold(householdName.trim() || "My family", patientName.trim(), consent);
     } finally {
       setBusy(false);
     }
@@ -83,20 +84,40 @@ export default function Onboarding() {
               </p>
             )}
 
+            <label className="flex items-start gap-2.5 rounded-lg border border-ink/12 bg-bone px-3 py-3">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(event) => setConsent(event.target.checked)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span className="font-inter text-[12px] leading-relaxed text-ink/65">
+                I confirm that {patientName.trim() || "this person"} has agreed to me
+                recording and viewing their medication information. Consent is recorded
+                explicitly and can be revoked.
+              </span>
+            </label>
+
             <button
               type="submit"
-              disabled={busy || patientName.trim().length < 2}
+              disabled={busy || patientName.trim().length < 2 || !consent}
               className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-ink font-inter text-[14px] font-medium tracking-[-0.02em] text-white transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />}
               Create household
             </button>
+
+            {!consent && (
+              <p className="text-center font-inter text-[11.5px] leading-relaxed text-amber-700">
+                Tick the consent box above to enable this button.
+              </p>
+            )}
           </form>
         </div>
 
         <p className="mt-4 px-1 font-inter text-[11.5px] leading-relaxed text-ink/35">
-          Creating a household records your consent to access this person's medication
-          record. You can revoke it at any time.
+          No access is granted until consent is explicitly confirmed. You can revoke it
+          at any time from the access controls.
         </p>
       </div>
     </div>

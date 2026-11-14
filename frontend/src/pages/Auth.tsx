@@ -17,7 +17,9 @@ export default function Auth({ mode }: { mode: "signin" | "signup" }) {
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState("caregiver");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,9 +44,11 @@ export default function Auth({ mode }: { mode: "signin" | "signup" }) {
 
     setBusy(true);
     try {
-      if (mode === "signup") await signUp(name, phone, password);
-      else await signIn(phone, password);
-      navigate("/app", { replace: true });
+      const signedIn =
+        mode === "signup"
+          ? await signUp(name, phone, password, role, email || undefined)
+          : await signIn(phone, password);
+      navigate(signedIn.role === "doctor" ? "/doctor/dashboard" : "/app", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not sign in.");
     } finally {
@@ -101,6 +105,39 @@ export default function Auth({ mode }: { mode: "signin" | "signup" }) {
                 autoComplete="name"
                 placeholder="Asha Sharma"
               />
+            )}
+            {isSignup && (
+              <Field
+                label="Email (optional)"
+                value={email}
+                onChange={setEmail}
+                type="email"
+                autoComplete="email"
+                placeholder="asha@example.com"
+                hint="Used for notification delivery when email is configured."
+              />
+            )}
+            {isSignup && (
+              <label className="block">
+                <span className="font-inter text-[13px] font-medium tracking-[-0.02em] text-white/70">
+                  Account type
+                </span>
+                <select
+                  value={role}
+                  onChange={(event) => setRole(event.target.value)}
+                  className="mt-1.5 h-12 w-full rounded-md border border-white/15 bg-white/[0.06] px-3.5 font-inter text-[15px] text-white outline-none focus:border-white/40"
+                >
+                  <option value="caregiver" className="text-ink">
+                    Caregiver
+                  </option>
+                  <option value="patient" className="text-ink">
+                    Patient
+                  </option>
+                  <option value="doctor" className="text-ink">
+                    Doctor (optional dashboard)
+                  </option>
+                </select>
+              </label>
             )}
             <Field
               label="Phone number"

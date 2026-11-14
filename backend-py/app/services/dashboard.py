@@ -96,7 +96,12 @@ def explain_case(session: Session, *, user_id: str, case_id: str) -> CaseExplana
 
     trigger = session.get(events.Event, case.trigger_event_id) if case.trigger_event_id else None
     payload = events.decode_payload(trigger) if trigger is not None else {}
-    occurred = trigger.occurred_at.isoformat() if trigger is not None else "unknown time"
+    # A doctor or caregiver reads this, so the timestamp is formatted rather than raw ISO.
+    occurred = (
+        trigger.occurred_at.astimezone(UTC).strftime("%d %b %Y, %H:%M UTC")
+        if trigger is not None
+        else "an unknown time"
+    )
 
     return CaseExplanation(
         what="Potential medication discrepancy",

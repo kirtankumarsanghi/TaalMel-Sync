@@ -98,10 +98,17 @@ def _issue_pair(session: Session, user: User, family: str | None = None) -> Toke
     return TokenPair(access_token=access, refresh_token=raw_refresh)
 
 
-def register(session: Session, *, name: str, phone: str, password: str, role: str) -> tuple[User, TokenPair]:
+def register(
+    session: Session, *, name: str, phone: str, password: str, role: str, email: str | None = None
+) -> tuple[User, TokenPair]:
     if session.exec(select(User).where(User.phone == phone)).first():
         raise AuthError("Phone number already registered", status_code=409)
-    user = User(role=role, name=name, phone=phone, password_hash=hash_password(password))
+    if email and session.exec(select(User).where(User.email == email)).first():
+        raise AuthError("Email already registered", status_code=409)
+    user = User(
+        role=role, name=name, phone=phone, email=(email.strip() or None) if email else None,
+        password_hash=hash_password(password),
+    )
     session.add(user)
     session.flush()
     tokens = _issue_pair(session, user)

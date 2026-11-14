@@ -49,6 +49,14 @@ TIMELINE_EVENTS = {
     EventType.CONFLICT_DETECTED: "Discrepancy detected",
 }
 
+# Prescription-level events are recorded against the member, so they get their own
+# readable labels when folded into a medicine's timeline.
+_PRESCRIPTION_LABELS = {
+    EventType.PRESCRIPTION_UPLOADED: "Prescription uploaded",
+    EventType.PRESCRIPTION_OCR_COMPLETED: "Prescription read by OCR",
+    EventType.PRESCRIPTION_VERIFIED: "Prescription confirmed by a person",
+}
+
 
 @dataclass(frozen=True)
 class TimelineEntry:
@@ -115,7 +123,22 @@ def _age_days(when: datetime, now: datetime) -> int:
 
 
 def _build_timeline(session: Session, medication_id: str, now: datetime) -> list[TimelineEntry]:
+    """Every dated fact about this medicine, in the order it happened.
+
+    Prescription-level events (uploaded, OCR, verified) are recorded against the
+    household member rather than the medicine, so they are pulled in here by joining
+    through the prescription item. Without this the timeline would show only the
+    normalisation step, which is exactly the history the export exists to provide.
+    """
     entries: list[TimelineEntry] = []
+
+    med = session.get(Medication, medication_id)
+    prescription_ids: set[str] = set()
+    if med is not None and med.prescription_item_id:
+        item = session.get(PrescriptionItem, med.prescription_item_id)
+        if item is not None:
+            prescription_ids.add(item.prescription_id)
+
     for event in events.events_for_medication(session, medication_id):
         label = TIMELINE_EVENTS.get(event.event_type)
         if label is None:
@@ -130,6 +153,30 @@ def _build_timeline(session: Session, medication_id: str, now: datetime) -> list
                 age_days=_age_days(event.occurred_at, now),
             )
         )
+
+    # Prescription-level events that belong to this medicine.
+    if prescription_ids and med is not None:
+        member_events = events.events_for_member(session, med.household_member_id)
+        for event in member_events:
+            if event.event_type not in {
+                EventType.PRESCRIPTION_UPLOADED,
+                EventType.PRESCRIPTION_OCR_COMPLETED,
+                EventType.PRESCRIPTION_VERIFIED,
+            }:
+                continue
+            payload = json.loads(event.payload)
+            if str(payload.get("prescription_id")) not in prescription_ids:
+                continue
+            entries.append(
+                TimelineEntry(
+                    date=event.occurred_at,
+                    label="Prescription",
+                    detail=_PRESCRIPTION_LABELS.get(event.event_type, event.event_type),
+                    source=event.source,
+                    age_days=_age_days(event.occurred_at, now),
+                )
+            )
+
     return sorted(entries, key=lambda e: e.date)
 
 
@@ -142,7 +189,7 @@ def _prescriber(session: Session, med: Medication) -> tuple[str | None, datetime
     prescription = session.get(Prescription, item.prescription_id)
     if prescription is None:
         return None, None
-    return prescription.prescribed_by, prescription.created_at
+    return prescription.prescribed_by, prescription.prescribed_on or prescription.created_at
 
 
 def _dimension_payload(dim) -> dict:
@@ -173,6 +220,18 @@ def _evidence_basis(state: MedicationState) -> str:
 
 def build_export(session: Session, *, user_id: str, household_member_id: str) -> DoctorExport:
     member = authorize_member(session, user_id, household_member_id)
+    return _build(session, member.id, member.display_name)
+
+
+def build_export_without_access(session: Session, household_member_id: str) -> DoctorExport:
+    """Typed export for callers that already established access.
+
+    Used by the token-gated public route, where the token itself is the credential.
+    Never call this from an authenticated route without an access check first.
+    """
+    member = session.get(HouseholdMember, household_member_id)
+    if member is None:
+        raise CaseError("Patient not found", status_code=404)
     return _build(session, member.id, member.display_name)
 
 

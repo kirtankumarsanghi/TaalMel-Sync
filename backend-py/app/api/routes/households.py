@@ -2,11 +2,11 @@ from datetime import datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.api.deps import CurrentUserDep, SessionDep
 from app.consent import service as consent
-from app.db.models import HouseholdMember, Patient
+from app.db.models import Household, HouseholdMember, Patient
 from app.households import service as households
 from app.services import emergency_contacts
 
@@ -126,6 +126,45 @@ def add_patient(
     return _patient_out(patient, member)
 
 
+@router.post("/households/{household_id}/members", response_model=PatientOut, status_code=201)
+def add_member(
+    household_id: str,
+    body: AddPatientIn,
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+) -> PatientOut:
+    """Compatibility alias for POST /households/{id}/patients."""
+    return add_patient(household_id, body, user_id, session)
+
+
+@router.post("/households/{household_id}/access", response_model=IdOut, status_code=201)
+def grant_household_access(
+    household_id: str,
+    body: GrantAccessIn,
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+) -> IdOut:
+    member = session.get(HouseholdMember, body.household_member_id)
+    if member is None or member.household_id != household_id:
+        raise consent.AccessDenied("Household member not found in this household", status_code=404)
+    return grant_access(body, user_id, session)
+
+
+@router.post(
+    "/households/{household_id}/access/{caregiver_access_id}/consent",
+    response_model=IdOut,
+    status_code=201,
+)
+def record_household_consent(
+    household_id: str,
+    caregiver_access_id: str,
+    body: RecordConsentIn,
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+) -> IdOut:
+    return record_consent(caregiver_access_id, body, user_id, session)
+
+
 @router.get("/patients/{patient_id}", response_model=PatientOut)
 def get_patient(
     patient_id: str, user_id: str = CurrentUserDep, session: Session = SessionDep
@@ -192,6 +231,74 @@ def revoke_consent(
 ) -> None:
     consent.revoke_consent_as_actor(
         session, acting_user_id=user_id, caregiver_access_id=caregiver_access_id
+    )
+
+
+class HouseholdDetailOut(BaseModel):
+    id: str
+    name: str
+    members: list[PatientOut]
+
+
+@router.get("/households/{household_id}", response_model=HouseholdDetailOut)
+def get_household(
+    household_id: str, user_id: str = CurrentUserDep, session: Session = SessionDep
+) -> HouseholdDetailOut:
+    household = session.get(Household, household_id)
+    if household is None:
+        raise consent.AccessDenied("Household not found", status_code=404)
+
+    members = session.exec(
+        select(HouseholdMember).where(HouseholdMember.household_id == household_id)
+    ).all()
+    visible: list[PatientOut] = []
+    for member in members:
+        try:
+            consent.authorize_member(session, user_id, member.id)
+        except consent.AccessDenied:
+            continue
+        patient = session.exec(
+            select(Patient).where(Patient.household_member_id == member.id)
+        ).first()
+        if patient is not None:
+            visible.append(_patient_out(patient, member))
+
+    if household.created_by != user_id and not visible:
+        raise consent.AccessDenied("Not authorized for this household")
+    return HouseholdDetailOut(id=household.id, name=household.name, members=visible)
+
+
+@router.post("/households/{household_id}/temporary-access", response_model=IdOut, status_code=201)
+def grant_temporary_access(
+    household_id: str,
+    body: GrantAccessIn,
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+) -> IdOut:
+    if body.expires_at is None:
+        raise consent.AccessDenied("expires_at is required for temporary access", status_code=400)
+    member = session.get(HouseholdMember, body.household_member_id)
+    if member is None or member.household_id != household_id:
+        raise consent.AccessDenied("Household member not found in this household", status_code=404)
+    access = consent.grant_access(
+        session,
+        granting_user_id=user_id,
+        caregiver_user_id=body.caregiver_user_id,
+        household_member_id=body.household_member_id,
+        expires_at=body.expires_at,
+    )
+    return IdOut(id=access.id)
+
+
+@router.delete("/households/{household_id}/temporary-access/{access_id}", status_code=204)
+def revoke_temporary_access(
+    household_id: str,
+    access_id: str,
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+) -> None:
+    consent.revoke_consent_as_actor(
+        session, acting_user_id=user_id, caregiver_access_id=access_id
     )
 
 

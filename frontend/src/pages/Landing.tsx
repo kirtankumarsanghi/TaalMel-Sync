@@ -251,8 +251,8 @@ export default function Landing() {
       </div>
 
       {/* Hero */}
-      <section className="relative z-10 flex flex-1 flex-col justify-center px-5 pb-10 pt-6 sm:px-8 lg:px-10 lg:pb-16">
-        <div className="max-w-[min(100%,62rem)]">
+      <section className="relative z-10 flex flex-1 flex-col justify-center px-5 pb-8 pt-4 sm:px-8 lg:px-10 lg:pb-12">
+        <div className="max-w-[min(100%,58rem)]">
           <h1 className="font-dm font-normal tracking-[-0.05em] text-[48px] leading-[50px] sm:text-[68px] sm:leading-[64px] md:text-[84px] md:leading-[78px] lg:text-[100px] lg:leading-[92px] xl:text-[112px] xl:leading-[102px]">
             <span className="block">
               <Word delay={0.3}>Every</Word> <Word delay={0.4}>dose,</Word>{" "}
@@ -292,20 +292,21 @@ export default function Landing() {
         </div>
 
         {/* Mobile / tablet visual */}
-        <div className="animate-scale-in delay-800 mt-10 flex items-center justify-center lg:hidden">
+        <div className="animate-scale-in delay-800 mt-8 flex items-center justify-center lg:hidden">
           <EvidenceCard />
         </div>
       </section>
 
-      {/* Desktop floating visual */}
-      <div className="animate-scale-in delay-700 pointer-events-none absolute bottom-[16%] right-[-2%] z-0 hidden lg:block xl:right-[2%]">
-        <div className="pointer-events-auto">
-          <EvidenceCard />
-        </div>
+      {/* Desktop floating visual.
+          z-20 puts it above the hero section, which is z-10 and spans the full height.
+          pointer-events-none keeps it from intercepting the headline or CTA. */}
+      <div className="animate-scale-in delay-700 pointer-events-none absolute bottom-[30%] right-6 z-20 hidden w-[420px] lg:block xl:right-12">
+        <EvidenceCard />
       </div>
 
-      {/* Three-panel strip */}
-      <div id="how" className="relative z-10 mt-auto grid grid-cols-1 md:grid-cols-[2fr_1fr_2fr]">
+      {/* Three-panel strip. Stacks until lg: at md width a 2:1:2 grid squeezes the middle
+          column until text wraps one word per line. */}
+      <div id="how" className="relative z-10 mt-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[2fr_1fr_2fr]">
         {/* Panel 1 */}
         <div className="animate-fade-up delay-900 relative overflow-hidden bg-bone px-6 py-8 sm:px-8 sm:py-10 lg:px-10 lg:py-12">
           <p className="font-dm text-2xl font-normal leading-[1.1] tracking-[-0.05em] text-ink sm:text-[26px] lg:text-[32px]">
@@ -320,8 +321,8 @@ export default function Landing() {
         </div>
 
         {/* Panel 2 — rotating */}
-        <div id="evidence" className="animate-fade-up delay-1000 flex flex-col justify-between bg-paper px-6 py-8 sm:px-8 sm:py-10">
-          <div className="relative min-h-[132px] sm:min-h-[148px]">
+        <div id="evidence" className="animate-fade-up delay-1000 flex flex-col justify-between gap-5 bg-paper px-6 py-8 sm:px-8 sm:py-10">
+          <div className="relative flex-1">
             {panels.map((panel, index) => {
               const Icon = panel.icon;
               const active = index === card;
@@ -339,7 +340,7 @@ export default function Landing() {
                   >
                     <Icon className="h-4 w-4 text-white sm:h-5 sm:w-5" strokeWidth={1.6} />
                   </div>
-                  <p className="font-inter text-sm font-normal leading-[1.2] tracking-[-0.03em] text-black/80 sm:text-base lg:text-[17px]">
+                  <p className="font-inter text-sm font-normal leading-[1.25] tracking-[-0.03em] text-black/80 sm:text-base lg:text-[17px]">
                     {panel.text}
                   </p>
                 </div>
@@ -347,7 +348,7 @@ export default function Landing() {
             })}
           </div>
 
-          <div className="mt-6 flex gap-1.5">
+          <div className="flex gap-1.5">
             {panels.map((panel, index) => (
               <button
                 key={panel.text}
@@ -363,16 +364,14 @@ export default function Landing() {
         </div>
 
         {/* Panel 3 */}
-        <div id="doctors" className="animate-fade-up delay-1100 flex flex-col items-start justify-between gap-6 bg-black px-6 py-8 sm:flex-row sm:items-center sm:px-8 sm:py-10 lg:px-10">
-          <div className="shrink-0">
-            <BreachCard />
-          </div>
-          <div className="sm:max-w-[190px]">
-            <p className="font-inter text-2xl font-normal tracking-[-0.05em] text-white sm:text-3xl lg:text-[34px]">
-              6 sources
+        <div id="doctors" className="animate-fade-up delay-1100 flex flex-col justify-center gap-5 bg-black px-6 py-8 sm:px-8 sm:py-10 md:col-span-2 lg:col-span-1 lg:px-10">
+          <BreachCard />
+          <div className="flex items-baseline gap-2.5">
+            <p className="font-inter text-2xl font-normal leading-none tracking-[-0.05em] text-white sm:text-3xl lg:text-[34px]">
+              6
             </p>
-            <p className="mt-1 font-inter text-sm font-normal leading-[1.2] tracking-[-0.03em] text-white/60 sm:text-base">
-              every fact dated, sourced and traceable
+            <p className="font-inter text-[12.5px] font-normal leading-[1.2] tracking-[-0.03em] text-white/60 sm:text-[13.5px]">
+              sources — every fact dated, sourced and traceable
             </p>
           </div>
         </div>

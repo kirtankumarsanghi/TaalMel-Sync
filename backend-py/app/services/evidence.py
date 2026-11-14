@@ -14,6 +14,7 @@ from typing import Literal
 
 from sqlmodel import Session
 
+from app.audit import service as audit
 from app.consent.service import authorize_member
 from app.db.models import Event, Medication
 from app.events import store as events
@@ -64,6 +65,7 @@ def report_taking(
     reason: ReasonCode | None = None,
     note: str | None = None,
     idempotency_key: str | None = None,
+    voice: bool = False,
 ) -> Event:
     med = _load_medication(session, user_id, medication_id)
     event = events.append_event(
@@ -72,11 +74,17 @@ def report_taking(
         payload=MedicationReportedPayload(
             medication_id=med.id, taking=taking, reason=reason, note=note
         ),
-        source=_source_for(role),
+        source=Source.VOICE if voice else _source_for(role),
         medication_id=med.id,
         source_user_id=user_id,
         created_by=user_id,
         idempotency_key=idempotency_key,
+    )
+    audit.log(
+        session,
+        audit.AuditAction.EVIDENCE_REPORTED,
+        user_id=user_id,
+        details={"medication_id": med.id, "taking": taking, "source": "voice" if voice else _source_for(role).value},
     )
     session.commit()
     _run_triggers(session, event)
@@ -111,6 +119,12 @@ def record_availability(
         created_by=user_id,
         idempotency_key=idempotency_key,
     )
+    audit.log(
+        session,
+        audit.AuditAction.EVIDENCE_AVAILABILITY_RECORDED,
+        user_id=user_id,
+        details={"medication_id": med.id, "present": present},
+    )
     session.commit()
     _run_triggers(session, event)
     return event
@@ -138,6 +152,12 @@ def confirm_status(
         source_user_id=user_id,
         created_by=user_id,
         idempotency_key=idempotency_key,
+    )
+    audit.log(
+        session,
+        audit.AuditAction.EVIDENCE_STATUS_CONFIRMED,
+        user_id=user_id,
+        details={"medication_id": med.id, "status": status},
     )
     session.commit()
     _run_triggers(session, event)
@@ -171,6 +191,12 @@ def record_dose_change(
         source_user_id=user_id,
         created_by=user_id,
     )
+    audit.log(
+        session,
+        audit.AuditAction.DOSE_CHANGED,
+        user_id=user_id,
+        details={"medication_id": med.id, "new_dose": new_dose, "changed_by": changed_by},
+    )
     session.commit()
     _run_triggers(session, event)
     return event
@@ -179,3 +205,19 @@ def record_dose_change(
 def history(session: Session, *, user_id: str, medication_id: str) -> list[Event]:
     med = _load_medication(session, user_id, medication_id)
     return list(events.events_for_medication(session, med.id))
+
+
+def medicines_for_member(session: Session, *, user_id: str, household_member_id: str) -> list[Medication]:
+    """The patient's medicines, for anything that must match against them.
+
+    Voice reports use this: a transcript is matched to a real medicine rather than to
+    free text, so the recorded report always points at one record.
+    """
+    from sqlmodel import select
+
+    authorize_member(session, user_id, household_member_id)
+    return list(
+        session.exec(
+            select(Medication).where(Medication.household_member_id == household_member_id)
+        ).all()
+    )

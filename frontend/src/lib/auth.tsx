@@ -1,13 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { api, clearTokens, getAccessToken, getRefreshToken, setTokens } from "./api";
+import { api, clearOutbox, clearTokens, flushOutbox, getAccessToken, getRefreshToken, setTokens } from "./api";
 import type { User } from "./api";
 
 type AuthState = {
   user: User | null;
   ready: boolean;
-  signIn: (phone: string, password: string) => Promise<void>;
-  signUp: (name: string, phone: string, password: string) => Promise<void>;
+  signIn: (phone: string, password: string) => Promise<User>;
+  signUp: (
+    name: string,
+    phone: string,
+    password: string,
+    role?: string,
+    email?: string,
+  ) => Promise<User>;
   signOut: () => Promise<void>;
 };
 
@@ -46,16 +52,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const tokens = await api.login(phone, password);
     setTokens(tokens.access_token, tokens.refresh_token);
     setUser(tokens.user);
+    void flushOutbox();
+    return tokens.user;
   }, []);
 
-  const signUp = useCallback(async (name: string, phone: string, password: string) => {
-    // Phone is the login identifier in this system, so it must never be blank
-    // or duplicated. The server rejects duplicates; formatting is normalised here.
-    const normalised = phone.replace(/[^\d+]/g, "");
-    const tokens = await api.register(name.trim(), normalised, password);
-    setTokens(tokens.access_token, tokens.refresh_token);
-    setUser(tokens.user);
-  }, []);
+  const signUp = useCallback(
+    async (name: string, phone: string, password: string, role = "caregiver", email?: string) => {
+      // Phone is the login identifier in this system, so it must never be blank
+      // or duplicated. The server rejects duplicates; formatting is normalised here.
+      const normalised = phone.replace(/[^\d+]/g, "");
+      const tokens = await api.register(name.trim(), normalised, password, role, email);
+      setTokens(tokens.access_token, tokens.refresh_token);
+      setUser(tokens.user);
+      void flushOutbox();
+      return tokens.user;
+    },
+    [],
+  );
 
   const signOut = useCallback(async () => {
     try {
@@ -64,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // A failed logout must still clear the local session.
     }
     clearTokens();
+    clearOutbox();
     setUser(null);
   }, []);
 

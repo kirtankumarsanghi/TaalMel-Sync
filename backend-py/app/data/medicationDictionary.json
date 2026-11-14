@@ -320,6 +320,118 @@
       "dosageForms": ["capsule", "extended-release tablet"],
       "activeIngredient": "Nifedipine",
       "category": "Calcium Channel Blocker"
+    },
+    {
+      "genericName": "Cefixime",
+      "brandNames": ["Taxim-O", "Zifi", "Cefolac", "Omnatax"],
+      "strengths": ["100mg", "200mg", "400mg"],
+      "dosageForms": ["tablet", "suspension"],
+      "activeIngredient": "Cefixime",
+      "category": "Antibiotic"
+    },
+    {
+      "genericName": "Cefuroxime",
+      "brandNames": ["Zinnat", "Ceftum", "Cefurom"],
+      "strengths": ["125mg", "250mg", "500mg"],
+      "dosageForms": ["tablet", "suspension"],
+      "activeIngredient": "Cefuroxime Axetil",
+      "category": "Antibiotic"
+    },
+    {
+      "genericName": "Doxycycline",
+      "brandNames": ["Doxt", "Doxy-1", "Minicycline", "Doxicip"],
+      "strengths": ["50mg", "100mg"],
+      "dosageForms": ["capsule", "tablet"],
+      "activeIngredient": "Doxycycline Hyclate",
+      "category": "Antibiotic"
+    },
+    {
+      "genericName": "Isotretinoin",
+      "brandNames": ["Sotret", "Isohyt", "Tretiva", "Accufine"],
+      "strengths": ["5mg", "10mg", "20mg", "30mg", "40mg"],
+      "dosageForms": ["capsule", "softgel capsule"],
+      "activeIngredient": "Isotretinoin",
+      "category": "Retinoid"
+    },
+    {
+      "genericName": "Adapalene",
+      "brandNames": ["Adaferin", "Deriva", "Adalene"],
+      "strengths": ["0.1%", "0.3%"],
+      "dosageForms": ["gel", "cream"],
+      "activeIngredient": "Adapalene",
+      "category": "Topical Retinoid"
+    },
+    {
+      "genericName": "Benzoyl Peroxide",
+      "brandNames": ["Persol", "Benzac", "Epiduo"],
+      "strengths": ["2.5%", "5%", "10%"],
+      "dosageForms": ["gel", "cream", "face wash"],
+      "activeIngredient": "Benzoyl Peroxide",
+      "category": "Topical Anti-acne"
+    },
+    {
+      "genericName": "Clindamycin",
+      "brandNames": ["Dalacin", "Clindac", "Clinmiskin"],
+      "strengths": ["1%", "2%"],
+      "dosageForms": ["gel", "lotion", "solution"],
+      "activeIngredient": "Clindamycin Phosphate",
+      "category": "Topical Antibiotic"
+    },
+    {
+      "genericName": "Levocetirizine",
+      "brandNames": ["Levocet", "Xyzal", "Lecope"],
+      "strengths": ["2.5mg", "5mg"],
+      "dosageForms": ["tablet", "syrup"],
+      "activeIngredient": "Levocetirizine Dihydrochloride",
+      "category": "Antihistamine"
+    },
+    {
+      "genericName": "Fluconazole",
+      "brandNames": ["Forcan", "Zocon", "Fluka"],
+      "strengths": ["50mg", "100mg", "150mg", "200mg"],
+      "dosageForms": ["tablet", "capsule"],
+      "activeIngredient": "Fluconazole",
+      "category": "Antifungal"
+    },
+    {
+      "genericName": "Itraconazole",
+      "brandNames": ["Itrasys", "Candiforce", "Sporanox"],
+      "strengths": ["100mg", "200mg"],
+      "dosageForms": ["capsule", "tablet"],
+      "activeIngredient": "Itraconazole",
+      "category": "Antifungal"
+    },
+    {
+      "genericName": "Ketoconazole",
+      "brandNames": ["Nizral", "Ketostar", "Fungicide"],
+      "strengths": ["2%"],
+      "dosageForms": ["shampoo", "cream", "lotion"],
+      "activeIngredient": "Ketoconazole",
+      "category": "Antifungal"
+    },
+    {
+      "genericName": "Mupirocin",
+      "brandNames": ["T-Bact", "Bactroban", "Supirocin"],
+      "strengths": ["2%"],
+      "dosageForms": ["ointment", "cream"],
+      "activeIngredient": "Mupirocin",
+      "category": "Topical Antibiotic"
+    },
+    {
+      "genericName": "Fusidic Acid",
+      "brandNames": ["Fucidin", "Fusiderm"],
+      "strengths": ["2%"],
+      "dosageForms": ["cream", "ointment"],
+      "activeIngredient": "Fusidic Acid",
+      "category": "Topical Antibiotic"
+    },
+    {
+      "genericName": "Hydroxyzine",
+      "brandNames": ["Atarax", "Hydrilla"],
+      "strengths": ["10mg", "25mg"],
+      "dosageForms": ["tablet", "syrup"],
+      "activeIngredient": "Hydroxyzine Hydrochloride",
+      "category": "Antihistamine"
     }
   ],
   "dosageFormAliases": {

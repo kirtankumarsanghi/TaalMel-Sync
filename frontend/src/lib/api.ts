@@ -47,7 +47,70 @@ type Options = {
   auth?: boolean;
   idempotencyKey?: string;
   signal?: AbortSignal;
+  // Evidence writes are safe to queue: the server dedupes them by idempotency key.
+  offlineQueue?: boolean;
 };
+
+type QueuedWrite = {
+  path: string;
+  method: "POST";
+  body: unknown;
+  idempotencyKey: string;
+};
+
+const OFFLINE_KEY = "taalmel.outbox";
+
+function readOutbox(): QueuedWrite[] {
+  try {
+    return JSON.parse(localStorage.getItem(OFFLINE_KEY) || "[]") as QueuedWrite[];
+  } catch {
+    return [];
+  }
+}
+
+function writeOutbox(items: QueuedWrite[]): void {
+  localStorage.setItem(OFFLINE_KEY, JSON.stringify(items));
+}
+
+export function queuedWriteCount(): number {
+  return readOutbox().length;
+}
+
+export function clearOutbox(): void {
+  localStorage.removeItem(OFFLINE_KEY);
+}
+
+function enqueueWrite(path: string, body: unknown, key?: string): void {
+  const items = readOutbox();
+  items.push({
+    path,
+    method: "POST",
+    body,
+    idempotencyKey: key || crypto.randomUUID(),
+  });
+  writeOutbox(items);
+}
+
+export async function flushOutbox(): Promise<number> {
+  const items = readOutbox();
+  if (items.length === 0) return 0;
+  const remaining: QueuedWrite[] = [];
+  let sent = 0;
+  for (const item of items) {
+    try {
+      await request(item.path, {
+        method: item.method,
+        body: item.body,
+        idempotencyKey: item.idempotencyKey,
+      });
+      sent += 1;
+    } catch {
+      remaining.push(item);
+    }
+  }
+  writeOutbox(remaining);
+  return sent;
+}
 
 async function parseError(response: Response): Promise<string> {
   try {
@@ -91,7 +154,20 @@ async function tryRefresh(): Promise<boolean> {
 }
 
 export async function request<T>(path: string, options: Options = {}): Promise<T> {
-  const { method = "GET", body, form, auth = true, idempotencyKey, signal } = options;
+  const {
+    method = "GET",
+    body,
+    form,
+    auth = true,
+    idempotencyKey,
+    signal,
+    offlineQueue = false,
+  } = options;
+
+  if (offlineQueue && typeof navigator !== "undefined" && !navigator.onLine) {
+    enqueueWrite(path, body, idempotencyKey);
+    return { id: "queued", queued: true } as T;
+  }
 
   const headers: Record<string, string> = {};
   if (form === undefined && body !== undefined) headers["Content-Type"] = "application/json";
@@ -100,24 +176,41 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
   const token = getAccessToken();
   if (auth && token) headers.Authorization = `Bearer ${token}`;
 
-  let response = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
+      signal,
+    });
+  } catch (err) {
+    if (offlineQueue) {
+      enqueueWrite(path, body, idempotencyKey);
+      return { id: "queued", queued: true } as T;
+    }
+    throw err;
+  }
 
   // An expired access token is normal; refresh once and retry.
   if (response.status === 401 && auth && getRefreshToken()) {
     const refreshed = await tryRefresh();
     if (refreshed) {
       const retryHeaders = { ...headers, Authorization: `Bearer ${getAccessToken()}` };
-      response = await fetch(`${BASE}${path}`, {
-        method,
-        headers: retryHeaders,
-        body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
-        signal,
-      });
+      try {
+        response = await fetch(`${BASE}${path}`, {
+          method,
+          headers: retryHeaders,
+          body: form ?? (body !== undefined ? JSON.stringify(body) : undefined),
+          signal,
+        });
+      } catch (err) {
+        if (offlineQueue) {
+          enqueueWrite(path, body, idempotencyKey);
+          return { id: "queued", queued: true } as T;
+        }
+        throw err;
+      }
     } else {
       clearTokens();
     }
@@ -202,6 +295,8 @@ export type Summary = {
 export type CaseRow = {
   id: string;
   medication_id: string;
+  medication_name: string | null;
+  issue: string | null;
   trigger_event_id: string | null;
   status: string;
   action_taken: string | null;
@@ -234,8 +329,11 @@ export type Prescription = {
   id: string;
   household_member_id: string;
   original_filename: string;
+  prescribed_by?: string | null;
+  prescribed_on?: string | null;
   ocr_status: string;
   ocr_error: string | null;
+  ocr_raw_text?: string | null;
   verified: boolean;
   items: {
     id: string;
@@ -255,6 +353,8 @@ export type TodayItem = {
   confirmed_status: string;
   reported_taking: string;
   instruction: string | null;
+  plain_explanation: string | null;
+  explanation_source: string | null;
 };
 
 export type SafetyResult = {
@@ -286,11 +386,17 @@ export type QuestionRow = {
 // ── Endpoint helpers ─────────────────────────────────────────────────
 
 export const api = {
-  register: (name: string, phone: string, password: string, role = "caregiver") =>
+  register: (
+    name: string,
+    phone: string,
+    password: string,
+    role = "caregiver",
+    email?: string,
+  ) =>
     request<Tokens>("/api/auth/register", {
       method: "POST",
       auth: false,
-      body: { name, phone, password, role },
+      body: { name, phone, password, role, email: email || null },
     }),
 
   login: (phone: string, password: string) =>
@@ -304,13 +410,23 @@ export const api = {
 
   me: () => request<User>("/api/auth/me"),
 
-  createHousehold: (household_name: string, patient_display_name: string) =>
+  createHousehold: (
+    household_name: string,
+    patient_display_name: string,
+    consent_recorded = false,
+  ) =>
     request<CreatedHousehold>("/api/households", {
       method: "POST",
-      body: { household_name, patient_display_name, consent_recorded: true },
+      body: { household_name, patient_display_name, consent_recorded },
     }),
 
   getPatient: (patientId: string) => request<Patient>(`/api/patients/${patientId}`),
+
+  prescriptionsForPatient: (patientId: string) =>
+    request<Prescription[]>(`/api/patients/${patientId}/prescriptions`),
+
+  getPrescription: (prescriptionId: string) =>
+    request<Prescription>(`/api/prescriptions/${prescriptionId}`),
 
   summary: (memberId: string) => request<Summary>(`/api/households/${memberId}/summary`),
 
@@ -336,6 +452,7 @@ export const api = {
     request<{ id: string }>(`/api/medications/${medicationId}/report`, {
       method: "POST",
       body: { taking, reason: reason ?? null, note: note ?? null },
+      offlineQueue: true,
     }),
 
   availability: (
@@ -351,6 +468,7 @@ export const api = {
         quantity_note: quantityNote ?? null,
         expiry_date: expiryDate ?? null,
       },
+      offlineQueue: true,
     }),
 
   detect: (medicationId: string) =>
@@ -385,6 +503,179 @@ export const api = {
       { method: "POST" },
     ),
 
+  doctorLinkQr: (memberId: string, baseUrl: string) =>
+    request<{ url: string; token: string; expires_at: string; qr_png_base64: string }>(
+      `/api/households/${memberId}/doctor-link/qr?base_url=${encodeURIComponent(baseUrl)}`,
+      { method: "POST" },
+    ),
+
+  // The browser cannot send an Authorization header on a plain download, so the export
+  // is fetched with the token and opened as a blob.
+  downloadExport: async (memberId: string, format: "pdf" | "html"): Promise<Blob> => {
+    const token = getAccessToken();
+    const response = await fetch(
+      `${BASE}/api/households/${memberId}/doctor-export?format=${format}`,
+      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+    );
+    if (!response.ok) throw new ApiError(await parseError(response), response.status);
+    return response.blob();
+  },
+
+  languages: () =>
+    request<{ code: string; name: string; native: string }[]>("/api/i18n/languages", {
+      auth: false,
+    }),
+
+  catalogue: (language: string) =>
+    request<{ language: string; strings: Record<string, string>; coverage: { translated: number; total: number } }>(
+      `/api/i18n/${language}`,
+      { auth: false },
+    ),
+
+  voiceReport: (memberId: string, audio: Blob, language?: string) => {
+    const form = new FormData();
+    form.append("audio", audio, "report.wav");
+    const query = language ? `?language=${encodeURIComponent(language)}` : "";
+    return request<{
+      recorded: boolean;
+      medication_id: string | null;
+      medication_name: string | null;
+      taking: boolean | null;
+      transcript: string;
+      clarification: string | null;
+    }>(`/api/households/${memberId}/voice-report${query}`, { method: "POST", form });
+  },
+
+  voiceReportText: (memberId: string, transcript: string, language?: string) => {
+    const form = new FormData();
+    form.append("transcript", transcript);
+    const query = language ? `?language=${encodeURIComponent(language)}` : "";
+    return request<{
+      recorded: boolean;
+      medication_id: string | null;
+      medication_name: string | null;
+      taking: boolean | null;
+      transcript: string;
+      clarification: string | null;
+    }>(`/api/households/${memberId}/voice-report${query}`, { method: "POST", form });
+  },
+
+  prescriptionDetails: (
+    prescriptionId: string,
+    prescribed_by: string | null,
+    prescribed_on: string | null,
+  ) =>
+    request<Prescription>(`/api/prescriptions/${prescriptionId}`, {
+      method: "PATCH",
+      body: { prescribed_by, prescribed_on },
+    }),
+
+  addPrescriptionItem: (
+    prescriptionId: string,
+    item: { medication_name: string; dosage?: string | null; frequency?: string | null; instructions?: string | null },
+  ) =>
+    request<Prescription["items"][number]>(`/api/prescriptions/${prescriptionId}/items`, {
+      method: "POST",
+      body: item,
+    }),
+
+  parsePrescriptionText: (prescriptionId: string, text: string) =>
+    request<Prescription["items"]>(`/api/prescriptions/${prescriptionId}/parse-text`, {
+      method: "POST",
+      body: { text },
+    }),
+
+  labReports: (patientId: string) =>
+    request<
+      {
+        id: string;
+        original_filename: string;
+        ocr_status: string;
+        captured_on: string | null;
+        lab_name: string | null;
+        values: { test_name: string; value: string; unit: string | null; reference_range_raw: string | null }[];
+      }[]
+    >(`/api/patients/${patientId}/lab-reports`),
+
+  uploadLabReport: (patientId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<Record<string, unknown>>(`/api/patients/${patientId}/lab-reports/upload`, {
+      method: "POST",
+      form,
+    });
+  },
+
+  wellnessTimeline: (patientId: string) =>
+    request<
+      { date: string; kind: string; title: string; detail: string | null; source: string | null }[]
+    >(`/api/patients/${patientId}/wellness-timeline`),
+
+  symptomReport: (patientId: string, symptom_text: string, severity: string) =>
+    request<{ id: string; symptom_text: string; severity: string; care_action: string }>(
+      `/api/patients/${patientId}/symptoms`,
+      { method: "POST", body: { symptom_text, severity } },
+    ),
+
+  refillOrder: (memberId: string) =>
+    request<{
+      id: string;
+      provider: string;
+      provider_order_id: string | null;
+      status: string;
+      detail: string | null;
+      items: { name: string; dose: string | null; reason: string }[];
+      created_at: string;
+    }>(`/api/households/${memberId}/refill-orders`, { method: "POST" }),
+
+  doctorRedeem: (token: string) =>
+    request<{ household_member_id: string; name: string; granted_at: string; expires_at: string | null }>(
+      "/api/doctor/redeem",
+      { method: "POST", body: { token } },
+    ),
+
+  doctorPatients: () =>
+    request<{ household_member_id: string; name: string; granted_at: string; expires_at: string | null }[]>(
+      "/api/doctor/patients",
+    ),
+
+  doctorPatientExport: (memberId: string) =>
+    request<Record<string, unknown>>(`/api/doctor/patients/${memberId}/export`),
+
+  taper: (medicationId: string, day?: number) =>
+    request<{
+      medication_id: string;
+      medicine: string;
+      schedule: { step: number; dose: string; duration_days: number }[];
+      current_step: number | null;
+      expected_dose: string | null;
+      reported_dose: string | null;
+      finding: string;
+      detail: string;
+    }>(`/api/medications/${medicationId}/taper${day !== undefined ? `?day=${day}` : ""}`),
+
+  setTaper: (medicationId: string, scheduleText: string) =>
+    request<{
+      schedule: { step: number; dose: string; duration_days: number }[];
+      finding: string;
+      detail: string;
+    }>(`/api/medications/${medicationId}/taper`, {
+      method: "POST",
+      body: { schedule_text: scheduleText },
+    }),
+
+  photoVerify: (medicationId: string, photo: File) => {
+    const form = new FormData();
+    form.append("photo", photo);
+    return request<{
+      id: string;
+      outcome: string;
+      detail: string | null;
+      confidence: number | null;
+      created_at: string;
+    }>(`/api/medications/${medicationId}/photo-verify`, { method: "POST", form });
+  },
+
   safetyCheck: (memberId: string) =>
     request<SafetyResult>(`/api/households/${memberId}/safety-check`),
 
@@ -407,6 +698,44 @@ export const api = {
       { method: "POST", form },
     );
   },
+
+  uploadDocument: (memberId: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{
+      document_id: string;
+      document_type: "PRESCRIPTION" | "LAB_REPORT" | "DISCHARGE_SUMMARY" | "INVOICE" | "OTHER";
+      ocr_status: string;
+      prescription_id: string | null;
+      lab_report_id: string | null;
+      item_count: number;
+      value_count: number;
+      message: string;
+      raw_text_preview: string;
+    }>(`/api/documents/upload?household_member_id=${encodeURIComponent(memberId)}`, {
+      method: "POST",
+      form,
+    });
+  },
+
+  documentAsPrescription: (documentId: string) =>
+    request<{ prescription_id: string }>(`/api/documents/${documentId}/as-prescription`, {
+      method: "POST",
+    }),
+
+  documents: (patientId: string) =>
+    request<
+      {
+        id: string;
+        document_type: string;
+        original_filename: string;
+        ocr_status: string;
+        ocr_error: string | null;
+        captured_on: string | null;
+        created_at: string;
+        raw_text_preview: string;
+      }[]
+    >(`/api/patients/${patientId}/documents`),
 
   verifyPrescription: (
     prescriptionId: string,

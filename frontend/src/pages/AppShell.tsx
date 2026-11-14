@@ -1,8 +1,9 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
   Activity,
   FileText,
+  HeartPulse,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -12,21 +13,33 @@ import {
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { useHousehold } from "../lib/household";
+import { useA11y } from "../lib/i18n";
 import { api } from "../lib/api";
 import type { NotificationRow } from "../lib/api";
 import Onboarding from "./Onboarding";
 
 const LINKS = [
-  { to: "/app", label: "Today", icon: LayoutDashboard, end: true },
-  { to: "/app/medicines", label: "Medicines", icon: Pill, end: false },
-  { to: "/app/cases", label: "Cases", icon: Activity, end: false },
-  { to: "/app/export", label: "Doctor export", icon: FileText, end: false },
-  { to: "/app/safety", label: "Safety", icon: ShieldCheck, end: false },
+  { to: "/app", key: "nav.today", fallback: "Today", icon: LayoutDashboard, end: true },
+  { to: "/app/medicines", key: "nav.medicines", fallback: "Medicines", icon: Pill, end: false },
+  { to: "/app/cases", key: "nav.cases", fallback: "Cases", icon: Activity, end: false },
+  { to: "/app/wellness", key: "nav.wellness", fallback: "Wellness", icon: HeartPulse, end: false },
+  { to: "/app/export", key: "nav.export", fallback: "Doctor export", icon: FileText, end: false },
+  { to: "/app/safety", key: "nav.safety", fallback: "Safety", icon: ShieldCheck, end: false },
 ];
 
 export default function AppShell() {
   const { user, signOut } = useAuth();
   const { patient, ready } = useHousehold();
+  const {
+    language,
+    languages,
+    setLanguage,
+    t,
+    largeText,
+    setLargeText,
+    highContrast,
+    setHighContrast,
+  } = useA11y();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
@@ -54,6 +67,9 @@ export default function AppShell() {
       </div>
     );
   }
+
+  // A doctor account belongs in the dashboard, not the caregiver reconciliation shell.
+  if (user?.role === "doctor") return <Navigate to="/doctor/dashboard" replace />;
 
   // A caregiver with no patient yet has nothing to reconcile, so onboarding comes
   // before the rest of the app rather than as an empty state.
@@ -91,7 +107,7 @@ export default function AppShell() {
         </div>
 
         <nav className="mt-2 space-y-0.5 px-3">
-          {LINKS.map(({ to, label, icon: Icon, end }) => (
+          {LINKS.map(({ to, key, fallback, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -106,8 +122,8 @@ export default function AppShell() {
               }
             >
               <Icon className="h-4 w-4" strokeWidth={1.7} />
-              {label}
-              {label === "Cases" && unread > 0 && (
+              {t(key, fallback)}
+              {key === "nav.cases" && unread > 0 && (
                 <span className="ml-auto rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                   {unread}
                 </span>
@@ -116,8 +132,52 @@ export default function AppShell() {
           ))}
         </nav>
 
-        <div className="absolute inset-x-0 bottom-0 border-t border-ink/10 p-3">
-          <div className="flex items-center gap-2.5 px-2 py-1.5">
+        <div className="absolute inset-x-0 bottom-0 border-t border-ink/10 p-3 space-y-2.5">
+          {/* Patient language & accessibility toggles */}
+          <div className="space-y-1.5 px-2">
+            <label className="block font-inter text-[11px] uppercase tracking-wide text-ink/40">
+              Patient language
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="mt-1 w-full rounded-md border border-ink/15 bg-bone px-2 py-1 font-inter text-[12px] text-ink"
+              >
+                {languages.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.native} ({lang.name})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <button
+                type="button"
+                onClick={() => setLargeText(!largeText)}
+                aria-pressed={largeText}
+                className={`flex-1 rounded-md border px-2 py-1 font-inter text-[11px] transition-colors ${
+                  largeText
+                    ? "border-ink bg-ink text-white"
+                    : "border-ink/15 bg-bone text-ink/70 hover:text-ink"
+                }`}
+              >
+                Large text
+              </button>
+              <button
+                type="button"
+                onClick={() => setHighContrast(!highContrast)}
+                aria-pressed={highContrast}
+                className={`flex-1 rounded-md border px-2 py-1 font-inter text-[11px] transition-colors ${
+                  highContrast
+                    ? "border-ink bg-ink text-white"
+                    : "border-ink/15 bg-bone text-ink/70 hover:text-ink"
+                }`}
+              >
+                High contrast
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 border-t border-ink/10 px-2 pt-2 pb-1">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-ink/10 font-dm text-[13px] font-medium text-ink">
               {(user?.name ?? "?").slice(0, 1).toUpperCase()}
             </div>

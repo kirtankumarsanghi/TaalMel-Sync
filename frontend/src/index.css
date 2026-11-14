@@ -30,6 +30,27 @@
       transition-duration: 0.01ms !important;
     }
   }
+
+  /* Accessibility: Large-text and High-contrast modes */
+  html.taalmel-large-text {
+    font-size: 118%;
+  }
+
+  html.taalmel-high-contrast body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  html.taalmel-high-contrast .bg-bone,
+  html.taalmel-high-contrast .bg-paper {
+    background-color: #ffffff !important;
+    border-color: #000000 !important;
+  }
+
+  html.taalmel-high-contrast .text-ink,
+  html.taalmel-high-contrast [class*="text-ink/"] {
+    color: #000000 !important;
+  }
 }
 
 @layer components {

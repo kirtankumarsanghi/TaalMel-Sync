@@ -18,7 +18,11 @@ type HouseholdState = {
   patient: Patient | null;
   ready: boolean;
   error: string | null;
-  createHousehold: (householdName: string, patientName: string) => Promise<void>;
+  createHousehold: (
+    householdName: string,
+    patientName: string,
+    consentRecorded?: boolean,
+  ) => Promise<void>;
   selectPatient: (patient: Patient) => void;
   refresh: () => Promise<void>;
 };
@@ -65,10 +69,14 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const createHousehold = useCallback(
-    async (householdName: string, patientName: string) => {
+    async (householdName: string, patientName: string, consentRecorded = false) => {
       setError(null);
       try {
-        const created = await api.createHousehold(householdName, patientName);
+        const created = await api.createHousehold(
+          householdName,
+          patientName,
+          consentRecorded,
+        );
         selectPatient(created.patient);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not create the household.");

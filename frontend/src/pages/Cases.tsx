@@ -67,10 +67,14 @@ export function Cases() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-inter text-[14px] font-medium text-ink">
-                    {row.reason_code ? pretty(row.reason_code) : "Reason not yet recorded"}
+                    {row.medication_name ?? "Medicine"}
                   </span>
-                  <span className="block font-inter text-[12px] text-ink/45">
-                    {row.status.toLowerCase().replace("_", " ")} · opened {formatDate(row.opened_at)}
+                  <span className="mt-0.5 block font-inter text-[12.5px] leading-snug text-ink/55">
+                    {row.issue ?? "Needs a reason"}
+                  </span>
+                  <span className="mt-0.5 block font-inter text-[11.5px] text-ink/40">
+                    {row.reason_code ? pretty(row.reason_code) : "reason not recorded"} ·{" "}
+                    {formatDate(row.opened_at)}
                   </span>
                 </span>
                 <ArrowRight className="h-4 w-4 shrink-0 text-ink/25" strokeWidth={1.8} />

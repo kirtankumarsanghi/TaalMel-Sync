@@ -26,6 +26,7 @@ class Source(StrEnum):
     DOCTOR = "doctor"
     OCR = "ocr"
     SYSTEM = "system"
+    VOICE = "voice"
 
 
 class Dimension(StrEnum):

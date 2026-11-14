@@ -10,7 +10,7 @@ import pytest
 from app.ocr import parsing
 from app.ocr.base import MedicationCandidate
 from app.ocr.lab_parsing import values_from_text
-from app.ocr.parsing import candidates_from_text, fix_ocr_digits, parse_line
+from app.ocr.parsing import candidates_from_text, parse_line, repair_digits
 from app.ocr.provider import ocr_mode
 
 
@@ -81,12 +81,12 @@ def test_duration_is_captured_separately() -> None:
     ],
 )
 def test_digit_confusions_are_repaired(raw: str, expected: str) -> None:
-    assert fix_ocr_digits(raw) == expected
+    assert repair_digits(raw) == expected
 
 
 @pytest.mark.parametrize("name", ["Omez", "Insulin Glargine 100iu/ml", "Omnacortil", "Ilosone"])
 def test_medicine_names_are_never_altered(name: str) -> None:
-    assert fix_ocr_digits(name) == name
+    assert repair_digits(name) == name
 
 
 def test_confusion_is_repaired_in_a_real_line() -> None:

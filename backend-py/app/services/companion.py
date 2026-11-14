@@ -13,10 +13,35 @@ from sqlmodel import Session, select
 from app.consent.service import authorize_member
 from app.db.models import DoctorQuestion, Medication
 from app.engines.state import compute_state
-from app.engines.triggers import check_refill
+from app.engines.triggers import check_refill, estimate_consumption
 from app.events import store as events
 from app.events.types import EventType
 from app.services.reconciliation import CaseError
+
+
+# Static, source-attributed plain-language descriptions (shown alongside, never replacing,
+# the doctor's instruction). Medicines not in this reviewed table return None.
+PLAIN_EXPLANATIONS: dict[str, tuple[str, str]] = {
+    "metformin": ("Helps keep blood sugar levels steady.", "WHO Essential Medicines"),
+    "amlodipine": ("Helps lower high blood pressure.", "WHO Essential Medicines"),
+    "atorvastatin": ("Helps lower cholesterol.", "WHO Essential Medicines"),
+    "aspirin": ("Used in low doses to help prevent blood clots.", "WHO Essential Medicines"),
+    "lisinopril": ("Helps relax blood vessels to lower blood pressure.", "WHO Essential Medicines"),
+    "telmisartan": ("Helps lower high blood pressure.", "WHO Essential Medicines"),
+    "omeprazole": ("Reduces stomach acid.", "WHO Essential Medicines"),
+    "pantoprazole": ("Reduces stomach acid.", "WHO Essential Medicines"),
+    "paracetamol": ("Helps relieve mild pain or fever.", "WHO Essential Medicines"),
+    "insulin": ("Helps control blood sugar levels.", "WHO Essential Medicines"),
+    "levothyroxine": ("Replaces thyroid hormone.", "WHO Essential Medicines"),
+}
+
+
+def plain_explanation_for(name: str | None) -> tuple[str | None, str | None]:
+    if not name:
+        return None, None
+    key = name.strip().lower().split()[0]
+    hit = PLAIN_EXPLANATIONS.get(key)
+    return (hit[0], hit[1]) if hit else (None, None)
 
 
 @dataclass(frozen=True)
@@ -27,6 +52,8 @@ class TodayItem:
     confirmed_status: str
     reported_taking: str
     instruction: str | None
+    plain_explanation: str | None = None
+    explanation_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,15 +78,19 @@ def today(session: Session, *, user_id: str, household_member_id: str) -> list[T
     items: list[TodayItem] = []
     for med in _medications(session, household_member_id):
         state = compute_state(med.id, list(events.events_for_medication(session, med.id)))
+        med_name = med.name_generic or med.name_raw
+        plain, plain_src = plain_explanation_for(med.name_generic or med.name_raw)
         items.append(
             TodayItem(
                 medication_id=med.id,
-                name=med.name_generic or med.name_raw,
+                name=med_name,
                 dose=state.current_dose or med.strength,
                 confirmed_status=state.confirmed_status.status,
                 reported_taking=state.reported_taking.status,
                 # The doctor's own instruction, shown verbatim. Never replaced.
                 instruction=med.instructions_raw,
+                plain_explanation=plain,
+                explanation_source=plain_src,
             )
         )
     return items
@@ -145,25 +176,57 @@ def mark_discussed(session: Session, *, user_id: str, question_id: str) -> Docto
 def refill_list(session: Session, *, user_id: str, household_member_id: str) -> list[RefillItem]:
     """A shopping list of medicines that may need refilling.
 
-    Ordering is deliberately not offered; the list is to hand to any pharmacy.
+    Two signals, in order of strength: how fast the patient is actually reporting taking
+    it, and the time since the last availability check. If there is enough evidence to
+    estimate consumption, that estimate drives the basis text so the caregiver knows how
+    the conclusion was reached. Ordering is deliberately not offered.
     """
     authorize_member(session, user_id, household_member_id)
     items: list[RefillItem] = []
+
     for med in _medications(session, household_member_id):
-        state = compute_state(med.id, list(events.events_for_medication(session, med.id)))
+        med_events = list(events.events_for_medication(session, med.id))
+        state = compute_state(med.id, med_events)
+
+        reported_by_day: dict[str, int] = {}
+        for event in med_events:
+            if event.event_type != EventType.MEDICATION_REPORTED:
+                continue
+            payload = events.decode_payload(event)
+            if not payload.get("taking"):
+                continue
+            occurred = event.occurred_at if event.occurred_at.tzinfo else event.occurred_at.replace(tzinfo=UTC)
+            reported_by_day[occurred.date().isoformat()] = (
+                reported_by_day.get(occurred.date().isoformat(), 0) + 1
+            )
+
+        estimate = estimate_consumption(reported_by_day)
         refill = check_refill(state)
+        # Only medicines that are actually due are listed; a consumption estimate alone
+        # is not a reason to buy more.
         if refill is None:
             continue
+
+        if estimate is not None:
+            basis = (
+                f"{estimate.basis} About {estimate.doses_per_day} dose(s) per day, so a "
+                f"30-dose strip lasts roughly "
+                f"{max(1, round(30 / max(estimate.doses_per_day, 0.1)))} days. "
+                f"Confirmed by the last availability check."
+            )
+        else:
+            basis = (
+                "Based on the recorded availability snapshot only. Not enough reported "
+                "doses yet to estimate how fast it is being used."
+            )
+
         items.append(
             RefillItem(
                 medication_id=med.id,
                 name=med.name_generic or med.name_raw,
                 dose=med.strength,
                 reason=refill.message,
-                basis=(
-                    "Based on the recorded availability snapshot, not a predicted "
-                    "consumption rate."
-                ),
+                basis=basis,
             )
         )
     return items

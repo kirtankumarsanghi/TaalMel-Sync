@@ -14,6 +14,9 @@ __pycache__/
 *.db-wal
 data/uploads/*
 !data/uploads/.gitkeep
+backend-py/data/uploads/*
+!backend-py/data/uploads/.gitkeep
+**/data/uploads/*
 
 # Logs
 *.log

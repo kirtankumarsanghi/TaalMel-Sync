@@ -17,6 +17,8 @@ class TodayOut(BaseModel):
     confirmed_status: str
     reported_taking: str
     instruction: str | None
+    plain_explanation: str | None = None
+    explanation_source: str | None = None
 
 
 class ChangeOut(BaseModel):
@@ -63,6 +65,8 @@ def today(
             confirmed_status=i.confirmed_status,
             reported_taking=i.reported_taking,
             instruction=i.instruction,
+            plain_explanation=i.plain_explanation,
+            explanation_source=i.explanation_source,
         )
         for i in service.today(session, user_id=user_id, household_member_id=household_member_id)
     ]

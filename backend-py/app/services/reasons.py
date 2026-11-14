@@ -26,7 +26,8 @@ from app.engines.reasons import REPEAT_THRESHOLD, ReasonAction, ReasonPolicy, po
 from app.events import store as events
 from app.events.payloads import ActionAssignedPayload, MedicationConfirmedPayload, ReasonRecordedPayload
 from app.events.types import CaseStatus, EventType, ReasonCode, Source
-from app.services.reconciliation import CaseError
+from app.services.notifications_delivery import deliver
+from app.services.reconciliation import CaseError, close_conflict_for_case
 
 
 @dataclass(frozen=True)
@@ -47,21 +48,18 @@ def _load_case(session: Session, user_id: str, case_id: str) -> tuple[Case, Medi
     return case, med
 
 
-def _notify_caregivers(session: Session, med: Medication, case: Case, reason: ReasonCode) -> None:
-    """Notify every caregiver whose consent is currently active for this member."""
+def _notify(session: Session, med: Medication, title: str, body: str) -> None:
+    """Write and attempt delivery for every caregiver with active consent."""
     accesses = session.exec(
         select(CaregiverAccess).where(CaregiverAccess.household_member_id == med.household_member_id)
     ).all()
     for access in accesses:
         if not has_active_consent(session, access):
             continue
-        session.add(
-            Notification(
-                user_id=access.caregiver_user_id,
-                title=f"Medicine follow-up: {med.name_generic or med.name_raw}",
-                body=f"Reason recorded: {reason.value.replace('_', ' ').lower()}. Case {case.id} needs attention.",
-            )
-        )
+        note = Notification(user_id=access.caregiver_user_id, title=title, body=body)
+        session.add(note)
+        session.flush()
+        deliver(session, note)
 
 
 def _execute(
@@ -73,8 +71,49 @@ def _execute(
     reason: ReasonCode,
     policy: ReasonPolicy,
 ) -> None:
+    name = med.name_generic or med.name_raw
     if policy.action == ReasonAction.OPEN_CASE_NOTIFY_CAREGIVER:
-        _notify_caregivers(session, med, case, reason)
+        _notify(
+            session,
+            med,
+            f"Medicine follow-up: {name}",
+            f"Reason recorded: {reason.value.replace('_', ' ').lower()}. Case {case.id} needs attention.",
+        )
+    elif policy.action == ReasonAction.SHOW_INSTRUCTION_SIDE_BY_SIDE:
+        _notify(
+            session,
+            med,
+            f"Dose instruction needs review: {name}",
+            "The original instruction is shown alongside the recorded evidence. "
+            "Taalmel does not interpret it; confirm with the doctor or pharmacist if unclear.",
+        )
+    elif policy.action == ReasonAction.SHOW_AFFORDABILITY_RESOURCES:
+        from app.services.affordability import affordability_resources
+
+        names = ", ".join(resource["name"] for resource in affordability_resources())
+        _notify(
+            session,
+            med,
+            f"Affordability support: {name}",
+            f"Public resources: {names}. Taalmel does not recommend a cheaper medicine; "
+            "speak with the doctor or pharmacist about alternatives.",
+        )
+    elif policy.action == ReasonAction.ROUTE_TO_PROFESSIONAL_FOLLOWUP:
+        _notify(
+            session,
+            med,
+            f"Follow-up recommended: {name}",
+            "A side effect was reported. Taalmel does not interpret symptoms. "
+            "Follow up with a healthcare professional.",
+        )
+    elif policy.action == ReasonAction.ROUTE_FOR_AWARENESS_NO_OVERRIDE:
+        _notify(
+            session,
+            med,
+            f"Patient declined: {name}",
+            "Recorded without judgement. The decision is not overridden. "
+            "The caregiver is informed for awareness.",
+        )
     elif policy.action == ReasonAction.INCREASE_REMINDERS:
         events.append_event(
             session,
@@ -118,7 +157,7 @@ def record_reason(
 
     policy = policy_for(reason)
 
-    events.append_event(
+    reason_event = events.append_event(
         session,
         event_type=EventType.REASON_RECORDED,
         payload=ReasonRecordedPayload(
@@ -136,6 +175,7 @@ def record_reason(
         case.status = CaseStatus.RESOLVED.value
         case.resolution_note = f"Closed by reason {reason.value}"
         case.resolved_at = datetime.now(UTC)
+        close_conflict_for_case(session, case, case.resolved_at)
 
     session.add(case)
     audit.log(
@@ -145,6 +185,11 @@ def record_reason(
         details={"case_id": case.id, "reason": reason.value, "action": policy.action.value},
     )
     session.commit()
+
+    # Let the event-driven trigger rules see the reason too (repeated patterns, etc.).
+    from app.services.triggers import notify_for_event
+
+    notify_for_event(session, reason_event)
     return case, policy
 
 

@@ -126,3 +126,44 @@ def correlation(
         )
         for f in findings
     ]
+
+
+@router.get("/patients/{patient_id}/lab-reports", response_model=list[LabReportOut])
+def list_patient_lab_reports(
+    patient_id: str, user_id: str = CurrentUserDep, session: Session = SessionDep
+) -> list[LabReportOut]:
+    from app.consent.service import authorize_member
+    from app.db.models import LabReport, Patient
+
+    patient = session.get(Patient, patient_id)
+    member_id = patient.household_member_id if patient is not None else patient_id
+    authorize_member(session, user_id, member_id)
+    reports = session.exec(
+        select(LabReport)
+        .where(LabReport.household_member_id == member_id)
+        .order_by(LabReport.created_at.desc())  # type: ignore[union-attr]
+    ).all()
+    out: list[LabReportOut] = []
+    for report in reports:
+        values = session.exec(select(LabValue).where(LabValue.lab_report_id == report.id)).all()
+        out.append(
+            LabReportOut(
+                id=report.id,
+                household_member_id=report.household_member_id,
+                original_filename=report.original_filename,
+                ocr_status=report.ocr_status,
+                ocr_error=report.ocr_error,
+                captured_on=report.captured_on,
+                lab_name=report.lab_name,
+                values=[
+                    LabValueOut(
+                        test_name=v.test_name,
+                        value=v.value,
+                        unit=v.unit,
+                        reference_range_raw=v.reference_range_raw,
+                    )
+                    for v in values
+                ],
+            )
+        )
+    return out

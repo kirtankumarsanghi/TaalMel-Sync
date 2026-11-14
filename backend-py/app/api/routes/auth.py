@@ -17,8 +17,9 @@ class RegisterIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=120)
     phone: str = Field(min_length=6, max_length=20)
+    email: str | None = Field(default=None, max_length=254)
     password: str = Field(min_length=8, max_length=256)
-    role: str = Field(pattern="^(caregiver|patient)$")
+    role: str = Field(pattern="^(caregiver|patient|doctor)$")
 
 
 class LoginIn(BaseModel):
@@ -37,6 +38,7 @@ class UserOut(BaseModel):
     role: str
     name: str
     phone: str | None
+    email: str | None = None
 
 
 class TokenOut(BaseModel):
@@ -47,7 +49,7 @@ class TokenOut(BaseModel):
 
 
 def _user_out(user: User) -> UserOut:
-    return UserOut(id=user.id, role=user.role, name=user.name, phone=user.phone)
+    return UserOut(id=user.id, role=user.role, name=user.name, phone=user.phone, email=user.email)
 
 
 def _token_out(user: User, tokens: auth_service.TokenPair) -> TokenOut:
@@ -61,7 +63,12 @@ def _token_out(user: User, tokens: auth_service.TokenPair) -> TokenOut:
 @router.post("/register", response_model=TokenOut, status_code=201)
 def register(body: RegisterIn, session: Session = SessionDep) -> TokenOut:
     user, tokens = auth_service.register(
-        session, name=body.name, phone=body.phone, password=body.password, role=body.role
+        session,
+        name=body.name,
+        phone=body.phone,
+        password=body.password,
+        role=body.role,
+        email=body.email,
     )
     audit.log(session, audit.AuditAction.REGISTER, user_id=user.id)
     session.commit()

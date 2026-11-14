@@ -25,6 +25,7 @@ from app.engines.triggers import (
     triggers_for_event,
 )
 from app.events import store as events
+from app.services.notifications_delivery import deliver
 from app.services.reconciliation import CaseError, detect_and_open_cases
 from app.services.reasons import detect_repeated_reasons
 
@@ -80,6 +81,13 @@ def _write(
     return created
 
 
+def _deliver_created(session: Session, created: list[Notification]) -> None:
+    for note in created:
+        deliver(session, note)
+    if created:
+        session.commit()
+
+
 def notify_for_event(session: Session, event: Event) -> list[Notification]:
     """Event-driven notifications. For evidence events this also re-runs reconciliation."""
     med = session.get(Medication, event.medication_id) if event.medication_id else None
@@ -96,7 +104,7 @@ def notify_for_event(session: Session, event: Event) -> list[Notification]:
         )
 
     if med is None:
-        session.commit()
+        _deliver_created(session, created)
         return created
 
     if event.event_type in ("MedicationReported", "AvailabilityObserved", "MedicationConfirmed"):
@@ -155,6 +163,7 @@ def notify_for_event(session: Session, event: Event) -> list[Notification]:
                 )
 
     session.commit()
+    _deliver_created(session, created)
     return created
 
 
@@ -207,7 +216,80 @@ def run_periodic_checks(session: Session, *, user_id: str, medication_id: str) -
             )
 
     session.commit()
+    _deliver_created(session, created)
     return created
+
+
+def run_daily_checks(session: Session) -> int:
+    """Scheduled sweep: refill windows, near-expiry warnings, and expired-stock cases.
+
+    Runs without a user because it is a system job. It uses the same rules and the
+    same dedupe keys as the interactive endpoint, so a daily run cannot spam.
+    """
+    from app.engines.conflicts import detect as detect_conflicts
+    from app.services.reconciliation import _open_new_cases
+
+    created_total = 0
+    for med in session.exec(select(Medication)).all():
+        state = compute_state(med.id, list(events.events_for_medication(session, med.id)))
+        member_id = med.household_member_id
+        name = med.name_generic or med.name_raw
+
+        refill = check_refill(state)
+        if refill is not None:
+            created_total += len(
+                _write(
+                    session,
+                    household_member_id=member_id,
+                    level=refill.level,
+                    trigger=Trigger(
+                        rule=refill.rule,
+                        message=f"{name}: {refill.message}",
+                        level=refill.level,
+                    ),
+                    dedupe_subject=refill.last_verified.isoformat()
+                    if refill.last_verified
+                    else "unknown",
+                )
+            )
+
+        expiry = check_expiry(state)
+        if expiry is not None and not expiry.expired:
+            created_total += len(
+                _write(
+                    session,
+                    household_member_id=member_id,
+                    level=expiry.level,
+                    trigger=Trigger(
+                        rule=expiry.rule,
+                        message=f"{name}: {expiry.message}",
+                        level=expiry.level,
+                    ),
+                    dedupe_subject=expiry.expiry_date.isoformat(),
+                )
+            )
+
+        if expiry is not None and expiry.expired:
+            result = detect_conflicts(state)
+            opened = _open_new_cases(session, med, result, None)
+            if opened and not _has_open_expiry_case(session, med.id):
+                created_total += len(
+                    _write(
+                        session,
+                        household_member_id=member_id,
+                        level=Escalation.CRITICAL,
+                        trigger=expired_stock_trigger(name, expiry.expiry_date),
+                        dedupe_subject=expiry.expiry_date.isoformat(),
+                    )
+                )
+
+    session.commit()
+    return created_total
+
+
+def run_all_periodic_checks(session: Session) -> int:
+    """Alias used by the scheduled worker."""
+    return run_daily_checks(session)
 
 
 def _has_open_expiry_case(session: Session, medication_id: str) -> bool:
@@ -246,3 +328,15 @@ def mark_read(session: Session, *, user_id: str, notification_id: str) -> Notifi
     session.add(note)
     session.commit()
     return note
+
+
+def run_all_periodic_checks(session: Session) -> int:
+    """Daily background sweep: check refill windows & expiry dates across all medications."""
+    total = 0
+    for med in session.exec(select(Medication)).all():
+        owner = _primary_caregiver(session, med.household_member_id)
+        if not owner:
+            continue
+        created = run_periodic_checks(session, user_id=owner, medication_id=med.id)
+        total += len(created)
+    return total

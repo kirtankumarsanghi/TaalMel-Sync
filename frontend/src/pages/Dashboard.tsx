@@ -5,6 +5,7 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock3,
+  Mic,
   PackageX,
   Pill,
   RefreshCw,
@@ -12,6 +13,7 @@ import {
 import { api } from "../lib/api";
 import type { CaseRow, Summary, TodayItem } from "../lib/api";
 import { useHousehold } from "../lib/household";
+import { useA11y } from "../lib/i18n";
 
 /**
  * Today.
@@ -22,11 +24,84 @@ import { useHousehold } from "../lib/household";
  */
 export default function Dashboard() {
   const { patient } = useHousehold();
+  const { language, t } = useA11y();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [today, setToday] = useState<TodayItem[]>([]);
   const [cases, setCases] = useState<CaseRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [voiceNote, setVoiceNote] = useState<string | null>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+
+  async function onVoiceUpload(file: File | undefined) {
+    if (!patient || !file) return;
+    setVoiceBusy(true);
+    setVoiceNote(null);
+    try {
+      const res = await api.voiceReport(patient.household_member_id, file, language);
+      handleVoiceResult(res);
+    } catch (err) {
+      setVoiceNote(err instanceof Error ? err.message : "Voice upload failed.");
+    } finally {
+      setVoiceBusy(false);
+    }
+  }
+
+  async function onVoiceTranscript(transcript: string) {
+    if (!patient || !transcript.trim()) return;
+    setVoiceBusy(true);
+    setVoiceNote(null);
+    try {
+      const res = await api.voiceReportText(patient.household_member_id, transcript, language);
+      handleVoiceResult(res);
+    } catch (err) {
+      setVoiceNote(err instanceof Error ? err.message : "Voice report failed.");
+    } finally {
+      setVoiceBusy(false);
+    }
+  }
+
+  function handleVoiceResult(res: {
+    recorded: boolean;
+    medication_name: string | null;
+    transcript: string;
+    clarification: string | null;
+  }) {
+    if (res.recorded) {
+      setVoiceNote(`Recorded (${res.medication_name}): "${res.transcript}"`);
+      void load();
+    } else {
+      setVoiceNote(res.clarification || "Could not match voice report.");
+    }
+  }
+
+  function startListening() {
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setVoiceNote("This browser does not support speech recognition. Attach an audio file instead.");
+      return;
+    }
+    const locales: Record<string, string> = {
+      en: "en-IN", hi: "hi-IN", ta: "ta-IN", te: "te-IN", bn: "bn-IN", mr: "mr-IN",
+    };
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = locales[language] ?? "en-IN";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    setVoiceBusy(true);
+    setVoiceNote(null);
+    recognition.onresult = (event: any) => {
+      const text = event.results?.[0]?.[0]?.transcript ?? "";
+      void onVoiceTranscript(text);
+    };
+    recognition.onerror = () => {
+      setVoiceBusy(false);
+      setVoiceNote("I could not hear that. Please try again or attach an audio file.");
+    };
+    recognition.onend = () => setVoiceBusy(false);
+    recognition.start();
+  }
 
   const load = useCallback(async () => {
     if (!patient) return;
@@ -56,10 +131,10 @@ export default function Dashboard() {
 
   return (
     <div className="mx-auto max-w-[1080px]">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+        <div className="min-w-0">
           <p className="font-inter text-[12.5px] uppercase tracking-wide text-ink/40">Today</p>
-          <h1 className="mt-1 font-dm text-[28px] font-normal leading-tight tracking-[-0.04em] text-ink sm:text-[34px]">
+          <h1 className="mt-1 truncate font-dm text-[28px] font-normal leading-tight tracking-[-0.04em] text-ink sm:text-[34px]">
             {patient.display_name}
           </h1>
         </div>
@@ -74,7 +149,7 @@ export default function Dashboard() {
           </button>
           <Link
             to="/app/medicines"
-            className="flex items-center gap-2 rounded-md bg-ink px-3.5 py-2 font-inter text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+            className="flex flex-1 items-center justify-center gap-2 rounded-md bg-ink px-3.5 py-2 font-inter text-[13px] font-medium text-white transition-opacity hover:opacity-90 sm:flex-none"
           >
             Record evidence
             <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.8} />
@@ -122,10 +197,10 @@ export default function Dashboard() {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block font-inter text-[14px] font-medium text-ink">
-                      {row.reason_code ? `Reason recorded: ${pretty(row.reason_code)}` : "Discrepancy needs a reason"}
+                      {row.medication_name ?? "Medicine"}
                     </span>
-                    <span className="block font-inter text-[12px] text-ink/45">
-                      Opened {formatDate(row.opened_at)} · {row.status.toLowerCase().replace("_", " ")}
+                    <span className="mt-0.5 block font-inter text-[12px] leading-snug text-ink/50">
+                      {row.issue ?? "Needs a reason"}
                     </span>
                   </span>
                   <ArrowRight className="h-4 w-4 shrink-0 text-ink/25" strokeWidth={1.8} />
@@ -138,14 +213,47 @@ export default function Dashboard() {
 
       {/* Today's medicines */}
       <section className="mt-8">
-        <h2 className="font-dm text-[18px] font-medium tracking-[-0.03em] text-ink">
-          Today's medicines
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-dm text-[18px] font-medium tracking-[-0.03em] text-ink">
+            {t("today.title", "Today's medicines")}
+          </h2>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              disabled={voiceBusy}
+              onClick={startListening}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ink/15 bg-paper px-3 py-1.5 font-inter text-[12px] text-ink/80 transition-colors hover:border-ink/30 hover:text-ink disabled:opacity-50"
+            >
+              <Mic className="h-3.5 w-3.5" strokeWidth={1.7} />
+              {voiceBusy ? t("report.listening", "Listening…") : t("report.speak", "Speak your answer")}
+            </button>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-ink/15 bg-paper px-3 py-1.5 font-inter text-[12px] text-ink/80 transition-colors hover:border-ink/30 hover:text-ink">
+              <Mic className="h-3.5 w-3.5" strokeWidth={1.7} />
+              Attach audio
+              <input
+                type="file"
+                accept="audio/*"
+                disabled={voiceBusy}
+                className="hidden"
+                onChange={(e) => {
+                  void onVoiceUpload(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+        </div>
+
+        {voiceNote && (
+          <p className="mt-2 rounded-lg border border-ink/10 bg-paper px-3 py-2 font-inter text-[12.5px] text-ink/80">
+            {voiceNote}
+          </p>
+        )}
 
         {today.length === 0 ? (
           <div className="mt-3 rounded-xl border border-dashed border-ink/20 bg-paper px-4 py-8 text-center">
             <p className="font-inter text-[13.5px] text-ink/50">
-              No medicines yet. Add a prescription to start the record.
+              {t("today.empty", "No medicines yet. Add a prescription to start the record.")}
             </p>
             <Link
               to="/app/medicines"
@@ -166,6 +274,11 @@ export default function Dashboard() {
                   {item.instruction && (
                     <p className="mt-0.5 font-inter text-[12px] italic text-ink/45">
                       Doctor's note: {item.instruction}
+                    </p>
+                  )}
+                  {item.plain_explanation && (
+                    <p className="mt-0.5 font-inter text-[12px] text-ink/65">
+                      Plain guide ({item.explanation_source}): {item.plain_explanation}
                     </p>
                   )}
                 </div>
@@ -219,14 +332,4 @@ function StatusPill({ status }: { status: string }) {
       {entry.label}
     </span>
   );
-}
-
-function pretty(code: string): string {
-  return code.toLowerCase().replace(/_/g, " ");
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "an unknown date";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }

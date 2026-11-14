@@ -130,7 +130,8 @@ def test_refill_list_appears_when_stock_is_low(client: TestClient, engine) -> No
     items = client.get(f"/api/households/{member_id}/refill-list", headers=headers).json()
     assert len(items) == 1
     assert items[0]["name"] == "Metformin"
-    assert "not a predicted consumption rate" in items[0]["basis"]
+    # The basis must say how the conclusion was reached, not just assert it.
+    assert "availability snapshot" in items[0]["basis"]
 
 
 # ── Temporary access handoff ────────────────────────────────────────

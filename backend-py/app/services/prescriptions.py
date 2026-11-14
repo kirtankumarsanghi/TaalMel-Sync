@@ -79,6 +79,8 @@ def upload_prescription(
     data: bytes,
     mime_type: str,
     filename: str,
+    prescribed_by: str | None = None,
+    prescribed_on: datetime | None = None,
 ) -> Prescription:
     validate_upload(data, mime_type, filename)
     authorize_member(session, user_id, household_member_id)
@@ -98,6 +100,8 @@ def upload_prescription(
 
     prescription = Prescription(
         household_member_id=household_member_id,
+        prescribed_by=prescribed_by,
+        prescribed_on=prescribed_on,
         file_storage_key=storage_key,
         original_filename=filename,
         mime_type=mime_type,
@@ -109,7 +113,7 @@ def upload_prescription(
     session.add(prescription)
     session.flush()
 
-    events.append_event(
+    uploaded_event = events.append_event(
         session,
         event_type=EventType.PRESCRIPTION_UPLOADED,
         payload=PrescriptionUploadedPayload(
@@ -127,6 +131,11 @@ def upload_prescription(
         details={"prescription_id": prescription.id, "household_member_id": household_member_id},
     )
     session.commit()
+
+    # Every event that can change the record also goes through the trigger rules.
+    from app.services.triggers import notify_for_event
+
+    notify_for_event(session, uploaded_event)
 
     queue.enqueue_ocr(prescription.id)
     return prescription
@@ -174,6 +183,17 @@ def run_ocr_job(
     prescription.ocr_raw_text = result.raw_text
     prescription.ocr_completed_at = now
     prescription.ocr_error = None
+
+    # The file was read successfully but nothing in it is a medicine. That is not the
+    # same as a technical failure, and the caregiver is told a different thing for each:
+    # "we could not read this" versus "this does not look like a prescription".
+    if status == "FAILED" and result.raw_text.strip():
+        prescription.ocr_status = "NO_MEDICINES_FOUND"
+        prescription.ocr_error = (
+            "The file was read, but no medicines were recognised in it. "
+            "Check that it is a prescription, or enter the medicines by hand."
+        )
+
     prescription.updated_at = now
     session.add(prescription)
 
@@ -205,7 +225,7 @@ def run_ocr_job(
             household_member_id=prescription.household_member_id,
         )
 
-    events.append_event(
+    completed_event = events.append_event(
         session,
         event_type=EventType.PRESCRIPTION_OCR_COMPLETED,
         payload=PrescriptionOcrCompletedPayload(
@@ -215,6 +235,10 @@ def run_ocr_job(
         household_member_id=prescription.household_member_id,
     )
     session.commit()
+
+    from app.services.triggers import notify_for_event
+
+    notify_for_event(session, completed_event)
     return prescription
 
 
@@ -254,6 +278,13 @@ def verify_prescription(
             raise PrescriptionError(
                 f"Item {requested.item_id} not found on this prescription", status_code=400
             )
+        cleaned = requested.medication_name.strip()
+        if not cleaned or cleaned.lower() == "new medicine":
+            raise PrescriptionError(
+                "Enter the real medicine name before confirming. "
+                "'New medicine' is a placeholder, not a medicine.",
+                status_code=400,
+            )
 
     now = _now()
     outcomes: list[MedicationOutcome] = []
@@ -284,7 +315,7 @@ def verify_prescription(
         prescription.updated_at = now
         session.add(prescription)
 
-        events.append_event(
+        verified_event = events.append_event(
             session,
             event_type=EventType.PRESCRIPTION_VERIFIED,
             payload=PrescriptionVerifiedPayload(
@@ -305,7 +336,166 @@ def verify_prescription(
     except Exception:
         session.rollback()
         raise
+
+    # Workflow A: verified prescription data flows into state & conflict detection.
+    from app.services.reconciliation import detect_and_open_cases
+    from app.services.triggers import notify_for_event
+
+    notify_for_event(session, verified_event)
+    for outcome in outcomes:
+        detect_and_open_cases(session, user_id=user_id, medication_id=outcome.medication.id)
+
     return outcomes
+
+
+def add_manual_item(
+    session: Session,
+    *,
+    user_id: str,
+    prescription_id: str,
+    medication_name: str,
+    dosage: str | None = None,
+    frequency: str | None = None,
+    instructions: str | None = None,
+) -> PrescriptionItem:
+    """Add a line by hand when handwriting OCR produced nothing usable.
+
+    The item is still unverified, so the normal confirmation gate applies.
+    """
+    prescription = session.get(Prescription, prescription_id)
+    if prescription is None:
+        raise PrescriptionError("Prescription not found", status_code=404)
+    authorize_member(session, user_id, prescription.household_member_id)
+    if prescription.verified:
+        raise PrescriptionError("This prescription is already verified.", status_code=409)
+
+    name = medication_name.strip()
+    if not name:
+        raise PrescriptionError("Medicine name is required.", status_code=400)
+    item = PrescriptionItem(
+        prescription_id=prescription.id,
+        medication_name=name,
+        dosage=dosage,
+        frequency=frequency,
+        instructions=instructions,
+        confidence=0.0,
+        ocr_raw_value="manual entry",
+        verified=False,
+    )
+    session.add(item)
+    session.flush()
+    audit.log(
+        session,
+        audit.AuditAction.PRESCRIPTION_ITEM_ADDED,
+        user_id=user_id,
+        details={"prescription_id": prescription.id, "medication_name": name},
+    )
+    session.commit()
+    return item
+
+
+def add_items_from_text(
+    session: Session,
+    *,
+    user_id: str,
+    prescription_id: str,
+    text: str,
+) -> list[PrescriptionItem]:
+    """Parse lines a person typed or pasted when OCR could not read the page.
+
+    The parser is the same one used for OCR text, so abbreviations and dosage forms
+    are handled consistently. Items remain unverified.
+    """
+    prescription = session.get(Prescription, prescription_id)
+    if prescription is None:
+        raise PrescriptionError("Prescription not found", status_code=404)
+    authorize_member(session, user_id, prescription.household_member_id)
+    if prescription.verified:
+        raise PrescriptionError("This prescription is already verified.", status_code=409)
+
+    from app.ocr.handwriting import fallback_candidates_from_text
+    from app.ocr.parsing import candidates_from_text
+
+    candidates = candidates_from_text(text) or fallback_candidates_from_text(text)
+    if not candidates:
+        raise PrescriptionError(
+            "No medicine lines could be parsed. Use one medicine per line, e.g. "
+            "'Tab Augmentin 625mg 1-0-1 x 5 days'.",
+            status_code=400,
+        )
+
+    created: list[PrescriptionItem] = []
+    for candidate in candidates:
+        item = PrescriptionItem(
+            prescription_id=prescription.id,
+            medication_name=candidate.medication_name,
+            dosage=candidate.dosage,
+            frequency=candidate.frequency,
+            instructions=candidate.instructions,
+            confidence=candidate.confidence,
+            ocr_raw_value=candidate.medication_name,
+            verified=False,
+        )
+        session.add(item)
+        session.flush()
+        created.append(item)
+        events.append_event(
+            session,
+            event_type=EventType.MEDICATION_EXTRACTED,
+            payload=MedicationExtractedPayload(
+                prescription_item_id=item.id,
+                name_raw=candidate.medication_name,
+                dosage=candidate.dosage,
+                frequency=candidate.frequency,
+                instructions=candidate.instructions,
+                confidence=candidate.confidence,
+            ),
+            source=Source.OCR,
+            household_member_id=prescription.household_member_id,
+        )
+    session.commit()
+    return created
+
+
+def list_for_patient(session: Session, *, user_id: str, patient_id: str) -> list[Prescription]:
+    from app.consent.service import authorize_patient
+
+    patient = authorize_patient(session, user_id, patient_id)
+    return list(
+        session.exec(
+            select(Prescription)
+            .where(Prescription.household_member_id == patient.household_member_id)
+            .order_by(Prescription.created_at.desc())  # type: ignore[union-attr]
+        ).all()
+    )
+
+
+def update_prescription_details(
+    session: Session,
+    *,
+    user_id: str,
+    prescription_id: str,
+    prescribed_by: str | None = None,
+    prescribed_on: datetime | None = None,
+) -> Prescription:
+    prescription = session.get(Prescription, prescription_id)
+    if prescription is None:
+        raise PrescriptionError("Prescription not found", status_code=404)
+    authorize_member(session, user_id, prescription.household_member_id)
+    if prescribed_by is not None:
+        prescription.prescribed_by = prescribed_by.strip() or None
+    if prescribed_on is not None:
+        prescription.prescribed_on = prescribed_on
+    prescription.updated_at = _now()
+    session.add(prescription)
+    audit.log(
+        session,
+        audit.AuditAction.PRESCRIPTION_UPDATED,
+        user_id=user_id,
+        details={"prescription_id": prescription.id},
+    )
+    session.commit()
+    return prescription
 
 
 def _safe_name(filename: str) -> str:

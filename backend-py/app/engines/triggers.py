@@ -71,6 +71,22 @@ def triggers_for_event(event_type: str) -> list[Trigger]:
                 level=Escalation.INFO,
             )
         ]
+    if event_type == EventType.PRESCRIPTION_OCR_COMPLETED:
+        return [
+            Trigger(
+                rule="PRESCRIPTION_READ",
+                message="A prescription has been read and is waiting for a person to confirm the medicines.",
+                level=Escalation.ACTION,
+            )
+        ]
+    if event_type == EventType.PRESCRIPTION_VERIFIED:
+        return [
+            Trigger(
+                rule="PRESCRIPTION_CONFIRMED",
+                message="A person confirmed the prescription; the medication list has been updated.",
+                level=Escalation.INFO,
+            )
+        ]
     if event_type in EVIDENCE_EVENTS:
         return [
             Trigger(
@@ -133,6 +149,53 @@ def check_refill(state: MedicationState, refill_window_days: int = REFILL_WINDOW
         level=Escalation.ACTION,
         last_verified=available.last_verified,
         age_days=available.age_days,
+    )
+
+
+# How many days of reported doses are needed before a consumption estimate is trusted.
+MIN_DAYS_FOR_ESTIMATE = 7
+
+
+@dataclass(frozen=True)
+class ConsumptionEstimate:
+    """How fast the medicine is actually being taken, from reported doses.
+
+    This is an estimate from *self-reports*, not from pharmacy dispensing, so it is
+    labelled as such wherever it is shown. When there is not enough evidence the
+    estimate is None and the caller falls back to the time window.
+    """
+
+    doses_per_day: float
+    days_of_evidence: int
+    reported_doses: int
+    basis: str
+
+
+def estimate_consumption(
+    reported_doses_by_day: dict[str, int] | None, min_days: int = MIN_DAYS_FOR_ESTIMATE
+) -> ConsumptionEstimate | None:
+    """Average reported doses per day across the days that actually have reports.
+
+    Counting only days with a report avoids the trap of dividing by calendar days and
+    understating consumption whenever the patient is simply quiet.
+    """
+    if not reported_doses_by_day:
+        return None
+
+    active_days = {day: count for day, count in reported_doses_by_day.items() if count > 0}
+    if len(active_days) < min_days:
+        return None
+
+    total = sum(active_days.values())
+    per_day = total / len(active_days)
+    return ConsumptionEstimate(
+        doses_per_day=round(per_day, 2),
+        days_of_evidence=len(active_days),
+        reported_doses=total,
+        basis=(
+            f"Estimated from {total} reported doses across {len(active_days)} days. "
+            f"Self-reported, not a pharmacy record."
+        ),
     )
 
 

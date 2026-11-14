@@ -42,9 +42,10 @@ def test_patient_declined_is_never_overridden() -> None:
     assert policy.closes_case is False
 
 
-def test_only_doctor_stop_and_forgot_close_the_case() -> None:
+def test_no_reason_auto_closes_a_case() -> None:
+    """Constraint #6: NEVER auto-close a case. A human must confirm resolution."""
     closing = {code for code, p in POLICY.items() if p.closes_case}
-    assert closing == {ReasonCode.FORGOT, ReasonCode.DOCTOR_TOLD_TO_STOP}
+    assert closing == set()
 
 
 def test_expired_stays_open() -> None:
@@ -125,14 +126,15 @@ def test_ran_out_keeps_case_open_and_notifies_caregiver(client: TestClient, engi
         assert followups[0].rule is None
 
 
-def test_forgot_increases_reminders_and_closes_case(client: TestClient, engine) -> None:
+def test_forgot_increases_reminders_without_auto_closing(client: TestClient, engine) -> None:
     med_id, member_id, headers = _setup(client, "9500000002")
     case_id = _open_stopped_case(client, med_id, member_id, headers)
 
     r = client.post(f"/api/cases/{case_id}/reason", headers=headers, json={"reason": "FORGOT"})
     assert r.status_code == 200, r.text
     assert r.json()["action"] == "INCREASE_REMINDERS"
-    assert r.json()["case"]["status"] == "RESOLVED"
+    assert r.json()["closes_case"] is False
+    assert r.json()["case"]["status"] == "OPEN"
 
     with Session(engine) as s:
         actions = [e.event_type for e in s.exec(select(Event)).all()]
@@ -140,14 +142,15 @@ def test_forgot_increases_reminders_and_closes_case(client: TestClient, engine) 
         assert "ReasonRecorded" in actions
 
 
-def test_doctor_told_to_stop_confirms_discontinuation_and_closes(client: TestClient, engine) -> None:
+def test_doctor_told_to_stop_confirms_discontinuation_without_auto_closing(client: TestClient, engine) -> None:
     med_id, member_id, headers = _setup(client, "9500000003")
     case_id = _open_stopped_case(client, med_id, member_id, headers)
 
     r = client.post(f"/api/cases/{case_id}/reason", headers=headers,
                     json={"reason": "DOCTOR_TOLD_TO_STOP"})
     assert r.status_code == 200, r.text
-    assert r.json()["case"]["status"] == "RESOLVED"
+    assert r.json()["closes_case"] is False
+    assert r.json()["case"]["status"] == "OPEN"
 
     state = client.get(f"/api/medications/{med_id}/state", headers=headers).json()
     assert state["confirmed_status"]["status"] == "DISCONTINUED"

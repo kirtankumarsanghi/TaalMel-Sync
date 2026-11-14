@@ -9,7 +9,7 @@ Python 3.12 + FastAPI implementation of the Phase 1 reconciliation engine.
 
 - Event store: append-only, typed payloads, idempotency keys.
 - Auth: JWT access + rotating refresh tokens (argon2 hashing), consent-gated caregiver access, audit trail.
-- Prescription intake: upload, SHA-256 dedupe per patient, OCR job (stub provider), verification.
+- Prescription intake: upload, SHA-256 dedupe per patient, OCR, human verification.
 - Normalization: brand/generic/strength/form/frequency matching over a curated dictionary.
 - Evidence: self-report, physical availability (with expiry), status confirmation, dose changes.
 - State engine: four evidence dimensions, each with its own freshness window.
@@ -41,22 +41,39 @@ Python 3.12 + FastAPI implementation of the Phase 1 reconciliation engine.
 
 ## Known limitations
 
-- **OCR is a stub** (prescription and lab). Real EasyOCR/PaddleOCR is a later phase.
-- **No client.** Patient screens, multilingual layout, large-text and high-contrast modes, and the QR image itself are UI work. This repo is the backend only.
-- **i18n and voice input are not built.** The API takes text and serves strings in English.
-- **Notifications are stored, never sent.** No SMS/push/email delivery exists.
-- **Tapering and photo verification are not built.**
-- **The ARQ worker path is untested** against live Redis; only the inline path is covered.
+- **Documents** — `POST /api/documents/upload` accepts prescriptions, lab reports,
+  discharge summaries, invoices, and unknown pages. It classifies the text, creates the
+  structured row when possible, and always stores the raw document. Handwritten lines
+  that the strict parser rejects are kept for human review, and a manual line can be
+  added when OCR returns nothing.
+- **OCR** reads PDF text layers first, then EasyOCR for printed scans. Handwritten Indian
+  prescriptions need a cloud provider: `TAALMEL_OCR_ENGINE=gemini` with a Google AI Studio
+  key (free tier), or `TAALMEL_OCR_ENGINE=google` with a Cloud Vision key. Local TrOCR is
+  available through the `handwriting` extra but is not reliable on cursive. No OCR output
+  becomes a medication without confirmation.
+- **Notifications** are written as rows and delivered over a configured webhook or SMTP
+  email. Without either configured, the row records `delivery_error="no delivery channel
+  configured"` rather than pretending it was sent.
+- **Background jobs** use the inline queue in development and ARQ + Redis when
+  `TAALMEL_JOB_QUEUE=arq` or `TAALMEL_OCR_INLINE=false`.
+- **Voice** accepts a browser-produced transcript (Web Speech API) or audio through
+  Whisper if the optional `speech` extra is installed.
+- **Photo verification** reads the packaging label with OCR and compares the text to the
+  expected medicine. It is label verification, not image-similarity matching.
+- **Pharmacy ordering** is a provider interface. With no API URL configured, the mock
+  provider records the order locally for a pharmacist.
 - **Curated dictionaries are illustrative**, not clinically validated.
 - **Rate limiting is in-process memory**, so it resets on restart.
+- **Doctor login is optional.** Public QR links still require no account; a doctor account
+  exists only to save patients in a dashboard.
 
 ## Run it
 
 ```bash
 uv sync
 uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
-# open http://127.0.0.1:8000/docs
+uv run uvicorn app.main:app --reload --port 8010
+# open http://127.0.0.1:8010/docs
 ```
 
 Tests:
@@ -79,7 +96,7 @@ app/
   events/         event types, payload models, store
   engines/        state, conflicts, cases, reasons, triggers (pure logic)
   services/       persistence around the engines
-  ocr/            OCR provider interfaces + stubs (prescription and lab)
+  ocr/            OCR providers (PDF text, EasyOCR, Google Vision, Gemini, TrOCR)
   jobs/           queue adapters + ARQ worker
   data/           curated dictionaries (medication, safety, affordability)
 alembic/          migrations

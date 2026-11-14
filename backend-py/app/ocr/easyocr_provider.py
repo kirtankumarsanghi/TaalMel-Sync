@@ -62,6 +62,32 @@ def _load_engine(languages: tuple[str, ...]) -> _Engine:
     return _engine
 
 
+def _pdf_text(data: bytes, page_limit: int = 20) -> str:
+    """Return the PDF's own text layer when it has one.
+
+    Generated reports and many hospital PDFs already contain selectable text. Running
+    OCR over a rendered page throws that accuracy away, so use the text layer first and
+    only rasterize scanned PDFs.
+    """
+    try:
+        import pymupdf  # PyMuPDF >= 2.x
+    except ImportError:  # pragma: no cover - older PyMuPDF only exposes `fitz`
+        try:
+            import fitz as pymupdf  # type: ignore[no-redef]
+        except ImportError:
+            return ""
+
+    try:
+        document = pymupdf.open(stream=data, filetype="pdf")
+    except Exception:
+        return ""
+
+    pages: list[str] = []
+    for index in range(min(page_limit, document.page_count)):
+        pages.append(document.load_page(index).get_text("text"))
+    return "\n".join(pages).strip()
+
+
 def _render_pdf(data: bytes, page_limit: int = 3) -> bytes:
     """Render the first pages of a PDF to a PNG, since the OCR engine takes images."""
     try:
@@ -113,6 +139,9 @@ class EasyOcrProvider:
 
     def _read(self, data: bytes, mime_type: str) -> str:
         if mime_type == "application/pdf":
+            text = _pdf_text(data)
+            if text:
+                return text
             data = _render_pdf(data)
 
         reader = self._injected if self._injected is not None else _load_engine(self._languages).reader
@@ -146,7 +175,16 @@ class EasyOcrProvider:
 
     def extract(self, data: bytes, mime_type: str) -> OcrResult:
         text = self._read(data, mime_type)
-        return OcrResult(raw_text=text, candidates=candidates_from_text(text))
+        candidates = candidates_from_text(text)
+        if not candidates:
+            from app.ocr.handwriting import fallback_candidates_from_text
+
+            candidates = fallback_candidates_from_text(text)
+        return OcrResult(raw_text=text, candidates=candidates)
+
+    def read_text(self, data: bytes, mime_type: str) -> str:
+        """Raw text from an image/PDF. Used by label verification as well as intake."""
+        return self._read(data, mime_type)
 
     def extract_lab(self, data: bytes, mime_type: str) -> LabResult:
         """Lab reports are tables, so values are parsed row by row from the same text."""

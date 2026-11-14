@@ -9,18 +9,22 @@ from app.api.routes import (
     auth,
     cases,
     companion,
+    compat,
     dashboard,
+    documents,
     evidence,
     exports,
     households,
     lab_reports,
     medications,
     notifications,
+    patient,
     prescriptions,
 )
 from app.auth.service import AuthError
 from app.config import get_settings
 from app.consent.service import AccessDenied
+from app.logging import configure_logging
 from app.services.evidence import EvidenceError
 from app.services.medications import MedicationError
 from app.services.prescriptions import PrescriptionError
@@ -30,6 +34,7 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[])
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(title="Taalmel Sync", version="0.1.0")
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -46,6 +51,17 @@ def create_app() -> FastAPI:
         expose_headers=["Content-Type"],
         max_age=600,
     )
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):  # noqa: ANN001
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(), microphone=(self), geolocation=()"
+        )
+        return response
 
     @app.exception_handler(AuthError)
     async def _auth_error(_: Request, exc: AuthError) -> JSONResponse:
@@ -86,6 +102,9 @@ def create_app() -> FastAPI:
     app.include_router(exports.router, prefix="/api", tags=["exports"])
     app.include_router(lab_reports.router, prefix="/api", tags=["lab reports"])
     app.include_router(companion.router, prefix="/api", tags=["companion"])
+    app.include_router(patient.router, prefix="/api", tags=["patient"])
+    app.include_router(compat.router, prefix="/api", tags=["compatibility"])
+    app.include_router(documents.router, prefix="/api", tags=["documents"])
     return app
 
 

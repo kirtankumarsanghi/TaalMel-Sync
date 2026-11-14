@@ -24,6 +24,7 @@ class User(SQLModel, table=True):
     role: str
     name: str
     phone: str | None = Field(default=None, unique=True)
+    email: str | None = Field(default=None, unique=True)
     password_hash: str
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
@@ -166,6 +167,7 @@ class Prescription(SQLModel, table=True):
     id: str = Field(default_factory=_uuid, primary_key=True)
     household_member_id: str = Field(foreign_key="household_members.id", index=True)
     prescribed_by: str | None = None
+    prescribed_on: datetime | None = None
     file_storage_key: str
     original_filename: str
     mime_type: str
@@ -263,6 +265,12 @@ class Notification(SQLModel, table=True):
     # Rule that produced this notification, plus the dedupe key for that rule + subject.
     rule: str | None = None
     dedupe_key: str | None = Field(default=None, unique=True)
+    # Delivery is tracked separately from creation: a row is written even when no
+    # channel is configured, and the failure is visible rather than silent.
+    channel: str | None = None
+    delivered_at: datetime | None = None
+    delivery_error: str | None = None
+    delivery_attempts: int = 0
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 
@@ -332,6 +340,76 @@ class LabValue(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
 
 
+class MedicalDocument(SQLModel, table=True):
+    """Any uploaded clinical document, including ones with no structured parser.
+
+    Prescriptions and lab reports also create their specialised rows; this table is the
+    unified intake record so a patient's uploads are never lost when the type is a
+    discharge summary, a doctor's note, or an unreadable page.
+    """
+
+    __tablename__ = "medical_documents"
+
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    household_member_id: str = Field(foreign_key="household_members.id", index=True)
+    document_type: str = Field(default="OTHER", index=True)
+    original_filename: str
+    mime_type: str
+    file_size_bytes: int
+    file_hash: str
+    file_storage_key: str
+    ocr_status: str = Field(default="PENDING", index=True)
+    ocr_error: str | None = None
+    raw_text: str | None = None
+    extracted_json: str | None = None
+    captured_on: str | None = None
+    uploaded_by_user_id: str = Field(foreign_key="users.id")
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class TaperSchedule(SQLModel, table=True):
+    """A gradual-reduction plan exactly as the prescriber wrote it.
+
+    Stored verbatim: the app tracks deviation, it never invents a taper.
+    """
+
+    __tablename__ = "taper_schedules"
+
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    medication_id: str = Field(foreign_key="medications.id", unique=True)
+    schedule_text: str
+    steps: str = "0"
+    prescribed_by: str | None = None
+    # The date the schedule started. Without this the tracker cannot know which step
+    # the patient should be on today; day counting is no longer caller-supplied.
+    started_on: datetime = Field(default_factory=_now)
+    active: bool = True
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class PhotoVerification(SQLModel, table=True):
+    """A caregiver's photo of the physical medicine, with its comparison outcome.
+
+    Default outcome is NOT_CHECKED: a comparison is only a statement when a real
+    matcher ran. "Not checked" must never be read as "confirmed correct".
+    """
+
+    __tablename__ = "photo_verifications"
+
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    medication_id: str = Field(foreign_key="medications.id", index=True)
+    household_member_id: str = Field(foreign_key="household_members.id")
+    file_storage_key: str
+    file_hash: str
+    outcome: str = "NOT_CHECKED"
+    detail: str | None = None
+    confidence: float | None = None
+    taken_by_user_id: str = Field(foreign_key="users.id")
+    created_at: datetime = Field(default_factory=_now)
+
+
 class AuditRecord(SQLModel, table=True):
     __tablename__ = "audit_records"
 
@@ -339,4 +417,60 @@ class AuditRecord(SQLModel, table=True):
     action: str
     user_id: str | None = Field(default=None, foreign_key="users.id")
     details: str
+    created_at: datetime = Field(default_factory=_now)
+
+
+class RefillOrder(SQLModel, table=True):
+    """A refill request sent to a pharmacy provider.
+
+    The provider is pluggable: without credentials the mock provider records the order
+    and returns a deterministic acknowledgement, so the workflow is testable and honest.
+    """
+
+    __tablename__ = "refill_orders"
+
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    household_member_id: str = Field(foreign_key="household_members.id", index=True)
+    requested_by_user_id: str = Field(foreign_key="users.id")
+    provider: str
+    provider_order_id: str | None = None
+    status: str = Field(default="PENDING", index=True)
+    items_json: str
+    detail: str | None = None
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class DoctorGrant(SQLModel, table=True):
+    """An optional doctor account's saved access to one patient.
+
+    The public token route remains the default; this lets a doctor who chooses to log
+    in keep a list of patients instead of re-scanning a QR at every visit.
+    """
+
+    __tablename__ = "doctor_grants"
+
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    doctor_user_id: str = Field(foreign_key="users.id", index=True)
+    household_member_id: str = Field(foreign_key="household_members.id", index=True)
+    granted_at: datetime = Field(default_factory=_now)
+    expires_at: datetime | None = None
+    last_viewed_at: datetime | None = None
+
+
+class SymptomReport(SQLModel, table=True):
+    """A patient's own description of a symptom.
+
+    The app records it and routes to care. It does not diagnose, triage by symptom
+    content, or name a medicine. Severity is the patient's own selection.
+    """
+
+    __tablename__ = "symptom_reports"
+
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    household_member_id: str = Field(foreign_key="household_members.id", index=True)
+    reported_by_user_id: str = Field(foreign_key="users.id")
+    symptom_text: str
+    severity: str = Field(default="ROUTINE")
+    care_action: str
     created_at: datetime = Field(default_factory=_now)
