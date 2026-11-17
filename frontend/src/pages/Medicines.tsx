@@ -12,6 +12,9 @@ import {
 import { api } from "../lib/api";
 import type { Medication, MedicationState } from "../lib/api";
 import { useHousehold } from "../lib/household";
+import CameraCapture from "../components/CameraCapture";
+
+const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
 /**
  * Medicines.
@@ -26,6 +29,7 @@ export default function Medicines() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
   const [pending, setPending] = useState<Medication[] | null>(null);
   const [active, setActive] = useState<Medication | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -52,9 +56,8 @@ export default function Medicines() {
     void load();
   }, [load]);
 
-  async function onFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !patient) return;
+  async function processUpload(file: File) {
+    if (!patient) return;
 
     setUploading(true);
     setError(null);
@@ -90,6 +93,11 @@ export default function Medicines() {
     }
   }
 
+  function onFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (file) void processUpload(file);
+  }
+
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof api.uploadPrescription>> | null>(
     null,
   );
@@ -105,7 +113,7 @@ export default function Medicines() {
             The record
           </h1>
         </div>
-        <div>
+        <div className="flex items-center gap-2">
           <input
             ref={fileRef}
             type="file"
@@ -113,6 +121,15 @@ export default function Medicines() {
             onChange={onFile}
             className="hidden"
           />
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={() => setShowCamera(true)}
+            className="flex items-center gap-2 rounded-md border border-ink/15 bg-white px-3 py-2 font-inter text-[13px] font-medium text-ink transition-colors hover:border-ink/30 disabled:opacity-60"
+          >
+            <Camera className="h-3.5 w-3.5" strokeWidth={1.8} />
+            Take photo
+          </button>
           <button
             type="button"
             disabled={uploading}
@@ -128,6 +145,14 @@ export default function Medicines() {
           </button>
         </div>
       </div>
+
+      {showCamera && (
+        <CameraCapture
+          title="Photograph prescription"
+          onCapture={(file) => void processUpload(file)}
+          onClose={() => setShowCamera(false)}
+        />
+      )}
 
       {error && (
         <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 font-inter text-[13px] leading-snug text-amber-900">
@@ -235,10 +260,35 @@ function VerifyPanel({
 }) {
   const [items, setItems] = useState(prescription.items);
   const [prescribedBy, setPrescribedBy] = useState(prescription.prescribed_by ?? "");
+  const [prescribedOn, setPrescribedOn] = useState(
+    prescription.prescribed_on ? prescription.prescribed_on.slice(0, 10) : "",
+  );
+  const [dateWarnDismissed, setDateWarnDismissed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pastedText, setPastedText] = useState("");
   const [parsing, setParsing] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+
+  async function retryRead() {
+    setRetrying(true);
+    setError(null);
+    try {
+      const fresh = await api.retryPrescriptionOcr(prescription.id);
+      setItems(fresh.items);
+      if (fresh.items.length === 0) {
+        setError(
+          fresh.ocr_error
+            ? `Still unreadable: ${fresh.ocr_error}`
+            : "Still no medicine lines. Add them by hand below.",
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not re-read this page.");
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   async function analysePastedText() {
     if (!pastedText.trim()) return;
@@ -271,6 +321,14 @@ function VerifyPanel({
   }
 
   async function confirm() {
+    if (!prescribedOn && !dateWarnDismissed) {
+      setError(
+        "Notice: You haven't entered a visit date. This prescription will appear under 'Date not recorded' in the timeline. Click 'Confirm anyway' to proceed, or enter a visit date above.",
+      );
+      setDateWarnDismissed(true);
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
@@ -297,9 +355,11 @@ function VerifyPanel({
           frequency: item.frequency,
         })),
       );
-      if (prescribedBy.trim()) {
-        await api.prescriptionDetails(prescription.id, prescribedBy.trim(), null);
-      }
+      await api.prescriptionDetails(
+        prescription.id,
+        prescribedBy.trim() || null,
+        prescribedOn ? new Date(prescribedOn).toISOString() : null,
+      );
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not confirm these items.");
@@ -335,17 +395,60 @@ function VerifyPanel({
         </button>
       </div>
 
-      <label className="mt-4 block">
-        <span className="font-inter text-[11.5px] font-medium text-ink/55">
-          Prescribed by (optional)
-        </span>
-        <input
-          value={prescribedBy}
-          onChange={(event) => setPrescribedBy(event.target.value)}
-          placeholder="Dr A. Rao"
-          className="mt-1 h-9 w-full rounded-md border border-ink/15 bg-white px-3 font-inter text-[12.5px] text-ink outline-none"
-        />
-      </label>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="font-inter text-[11.5px] font-medium text-ink/55">
+            Visit date (recommended)
+          </span>
+          <div className="mt-1 flex items-center gap-1.5">
+            <input
+              type="date"
+              value={prescribedOn}
+              onChange={(event) => {
+                setPrescribedOn(event.target.value);
+                setDateWarnDismissed(false);
+              }}
+              max={TODAY_ISO}
+              className="h-9 flex-1 rounded-md border border-ink/15 bg-white px-3 font-inter text-[12.5px] text-ink outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setPrescribedOn(TODAY_ISO);
+                setDateWarnDismissed(false);
+              }}
+              className="h-9 rounded-md border border-ink/15 bg-white px-2.5 font-inter text-[11.5px] text-ink/65 hover:text-ink"
+            >
+              Today
+            </button>
+          </div>
+        </label>
+
+        <label className="block">
+          <span className="font-inter text-[11.5px] font-medium text-ink/55">
+            Prescribed by (optional)
+          </span>
+          <input
+            value={prescribedBy}
+            onChange={(event) => setPrescribedBy(event.target.value)}
+            placeholder="Dr A. Rao"
+            className="mt-1 h-9 w-full rounded-md border border-ink/15 bg-white px-3 font-inter text-[12.5px] text-ink outline-none"
+          />
+        </label>
+      </div>
+
+      {!prescribedOn && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50/80 p-3 text-[12px] text-amber-900">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+          <div>
+            <p className="font-medium">No visit date recorded</p>
+            <p className="mt-0.5 text-amber-800 leading-relaxed">
+              Without a visit date, this prescription will land in <strong>&ldquo;Date not recorded&rdquo;</strong> in the
+              timeline and history. Archive imports require a date; manual uploads should record one whenever possible.
+            </p>
+          </div>
+        </div>
+      )}
 
       <ul className="mt-4 space-y-2">
         {items.map((item, index) => (
@@ -402,10 +505,20 @@ function VerifyPanel({
       </ul>
 
       {items.length === 0 && (
-        <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 font-inter text-[12.5px] leading-relaxed text-amber-900">
-          Nothing was read automatically. This is common with handwriting. Add each medicine
-          by hand below; nothing is saved until you confirm.
-        </p>
+        <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+          <p className="font-inter text-[12.5px] leading-relaxed text-amber-900">
+            Nothing was read automatically. This is common with handwriting. Add each medicine
+            by hand below; nothing is saved until you confirm.
+          </p>
+          <button
+            type="button"
+            onClick={() => void retryRead()}
+            disabled={retrying}
+            className="mt-2 rounded-md border border-amber-400 bg-white px-2.5 py-1.5 font-inter text-[12px] text-amber-900 disabled:opacity-50"
+          >
+            {retrying ? "Re-reading…" : "Re-read this page"}
+          </button>
+        </div>
       )}
 
       <button
@@ -471,7 +584,7 @@ function VerifyPanel({
           ) : (
             <Check className="h-3.5 w-3.5" strokeWidth={2.2} />
           )}
-          Confirm and add
+          {!prescribedOn && dateWarnDismissed ? "Confirm anyway (undated)" : "Confirm and add"}
         </button>
         <button
           type="button"
@@ -500,6 +613,10 @@ function EvidenceDrawer({
   const [mode, setMode] = useState<"report" | "availability" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [taper, setTaper] = useState<
+    { schedule: { step: number; dose: string; duration_days: number }[]; finding: string; detail: string } | null
+  >(null);
+  const [taperText, setTaperText] = useState("");
 
   useEffect(() => {
     api
@@ -551,10 +668,6 @@ function EvidenceDrawer({
   const [expiry, setExpiry] = useState("");
 
   // Taper and photo check, both optional and both consent-gated on the server.
-  const [taper, setTaper] = useState<
-    { schedule: { step: number; dose: string; duration_days: number }[]; finding: string; detail: string } | null
-  >(null);
-  const [taperText, setTaperText] = useState("");
   const [photoResult, setPhotoResult] = useState<{ outcome: string; detail: string | null } | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
 

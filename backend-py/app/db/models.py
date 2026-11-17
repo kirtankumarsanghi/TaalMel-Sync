@@ -86,6 +86,8 @@ class CaregiverAccess(SQLModel, table=True):
     # Temporary access handoff: when this passes, the row grants nothing. Enforced at
     # read time, so no background job is needed to expire it.
     expires_at: datetime | None = None
+    # A revoke ends the row permanently; recording consent again must not reopen it.
+    revoked_at: datetime | None = None
     updated_at: datetime = Field(default_factory=_now)
 
 
@@ -474,3 +476,33 @@ class SymptomReport(SQLModel, table=True):
     severity: str = Field(default="ROUTINE")
     care_action: str
     created_at: datetime = Field(default_factory=_now)
+
+
+class Condition(SQLModel, table=True):
+    """A diagnosis written on a document, kept for the longitudinal record.
+
+    OCR can misread a diagnosis, so an extracted condition starts unconfirmed and is
+    only used for grouping once a person has confirmed the wording. The original text is
+    kept in `name_raw` so a correction never destroys what the page actually said.
+    """
+
+    __tablename__ = "conditions"
+
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    household_member_id: str = Field(foreign_key="household_members.id", index=True)
+    name: str
+    name_raw: str | None = None
+    status: str = Field(default="ACTIVE", index=True)
+    onset_date: datetime | None = None
+    source_prescription_id: str | None = Field(
+        default=None, foreign_key="prescriptions.id", index=True
+    )
+    source_document_id: str | None = Field(
+        default=None, foreign_key="medical_documents.id", index=True
+    )
+    confirmed: bool = False
+    confirmed_at: datetime | None = None
+    confirmed_by_user_id: str | None = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+

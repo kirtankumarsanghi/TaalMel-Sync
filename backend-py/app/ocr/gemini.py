@@ -18,9 +18,29 @@ from app.ocr.parsing import candidates_from_text
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 PROMPT = (
-    "Transcribe every word and number on this medical page exactly as written. "
-    "Preserve the line breaks. Do not explain, do not summarise, do not add medicines, "
-    "do not correct spelling, and do not omit handwriting. Output only the transcription."
+    "You are transcribing an Indian doctor's prescription. The page mixes printed "
+    "letterhead with cursive handwriting, abbreviations, and arrows.\n"
+    "Output plain text only, in this order:\n"
+    "1. A short header: clinic or doctor name if printed, patient name, age, weight, "
+    "and the written diagnosis. One fact per line. Prefix the diagnosis line with 'Dx '.\n"
+    "2. A line containing only 'Rx'.\n"
+    "3. One medicine per line, written as plain text the way a pharmacist would read it. "
+    "Start each medicine line with Tab, Cap, Syp, Inj, Cream, Gel, Oint, Lotion, Soap, "
+    "or Drops. Then the brand or generic name, the strength with its unit, and the "
+    "schedule (OD, BD, TDS, HS, 1-0-1, morning, night, x N days, or the written duration). "
+    "Keep extra instructions such as 'after food' or 'local application' on the same line. "
+    "Read every numbered item. A gel, cream, or lotion is a medicine line even when the "
+    "strength is not written. Do not merge two medicines onto one line.\n"
+    "4. Advice or investigations that are not medicines, each on its own line, after the "
+    "medicine lines. Do not put a dosage-form word on those lines.\n"
+    "Rules: transcribe only what is on the page. Do not invent a medicine, a strength, "
+    "or a duration that is not written. If a word is unreadable, write [unclear] in its "
+    "place rather than guessing. Do not explain. Do not use markdown or bullet symbols.\n"
+    "Handwriting: distinguish 1 from 7 and mg from g. A tablet strength is usually mg, "
+    "not g. Copy the brand letters you can see; do not substitute a different drug. "
+    "Common dermatology brands on such pages include Sotret, Isotretinoin, Adapalene, "
+    "Benzac, Persol, and Desowen — use one of these only when the writing actually "
+    "matches it, never as a guess."
 )
 
 
@@ -59,30 +79,51 @@ class GeminiVisionProvider:
                     ]
                 }
             ],
-            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096},
+            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 8192},
         }
         import httpx
 
-        try:
-            response = httpx.post(
-                ENDPOINT.format(model=self._model),
-                params={"key": self._api_key},
-                json=payload,
-                timeout=60.0,
-            )
-            response.raise_for_status()
-            body = response.json()
-            candidates = body.get("candidates") or []
-            if not candidates:
-                raise OcrInputError(
-                    str(body.get("promptFeedback") or body.get("error") or "Gemini returned no text")
+        # Google's free tier returns 503/429 when it is busy. That is transient and
+        # must not become a failed document on the first attempt.
+        retry_statuses = {429, 500, 502, 503, 504}
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = httpx.post(
+                    ENDPOINT.format(model=self._model),
+                    params={"key": self._api_key},
+                    json=payload,
+                    timeout=60.0,
                 )
-            parts = candidates[0].get("content", {}).get("parts") or []
-            return "\n".join(str(part.get("text", "")) for part in parts).strip()
-        except OcrInputError:
-            raise
-        except Exception as exc:
-            raise OcrInputError(f"Gemini OCR failed: {str(exc)[:250]}") from exc
+                if response.status_code in retry_statuses and attempt < 2:
+                    import time
+
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                response.raise_for_status()
+                body = response.json()
+                candidates = body.get("candidates") or []
+                if not candidates:
+                    raise OcrInputError(
+                        str(
+                            body.get("promptFeedback")
+                            or body.get("error")
+                            or "Gemini returned no text"
+                        )
+                    )
+                parts = candidates[0].get("content", {}).get("parts") or []
+                return "\n".join(str(part.get("text", "")) for part in parts).strip()
+            except OcrInputError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                if attempt < 2:
+                    import time
+
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                break
+        raise OcrInputError(f"Gemini OCR failed: {str(last_error)[:250]}") from last_error
 
     def extract(self, data: bytes, mime_type: str) -> OcrResult:
         text = self._read(data, mime_type)

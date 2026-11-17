@@ -4,11 +4,13 @@ import {
   Activity,
   FileText,
   HeartPulse,
+  History,
   LayoutDashboard,
   LogOut,
   Menu,
   Pill,
   ShieldCheck,
+  Users,
   X,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
@@ -21,10 +23,12 @@ import Onboarding from "./Onboarding";
 const LINKS = [
   { to: "/app", key: "nav.today", fallback: "Today", icon: LayoutDashboard, end: true },
   { to: "/app/medicines", key: "nav.medicines", fallback: "Medicines", icon: Pill, end: false },
+  { to: "/app/history", key: "nav.history", fallback: "History", icon: History, end: false },
   { to: "/app/cases", key: "nav.cases", fallback: "Cases", icon: Activity, end: false },
   { to: "/app/wellness", key: "nav.wellness", fallback: "Wellness", icon: HeartPulse, end: false },
   { to: "/app/export", key: "nav.export", fallback: "Doctor export", icon: FileText, end: false },
   { to: "/app/safety", key: "nav.safety", fallback: "Safety", icon: ShieldCheck, end: false },
+  { to: "/app/caregivers", key: "nav.caregivers", fallback: "Caregivers", icon: Users, end: false },
 ];
 
 export default function AppShell() {
@@ -43,6 +47,7 @@ export default function AppShell() {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
+  const [pendingInvites, setPendingInvites] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -55,6 +60,18 @@ export default function AppShell() {
       .catch(() => {
         // Notifications are supplementary; a failure must not block the app.
       });
+
+    api
+      .myAccess()
+      .then((rows) => {
+        if (!cancelled) {
+          setPendingInvites(rows.filter((r) => r.status === "PENDING").length);
+        }
+      })
+      .catch(() => {
+        // Supplementary check
+      });
+
     return () => {
       cancelled = true;
     };
@@ -126,6 +143,11 @@ export default function AppShell() {
               {key === "nav.cases" && unread > 0 && (
                 <span className="ml-auto rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                   {unread}
+                </span>
+              )}
+              {key === "nav.caregivers" && pendingInvites > 0 && (
+                <span className="ml-auto rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                  {pendingInvites}
                 </span>
               )}
             </NavLink>

@@ -132,9 +132,11 @@ def check_refill(state: MedicationState, refill_window_days: int = REFILL_WINDOW
         return None
 
     quantity = available.details.get("quantity_note")
-    nearly_empty = quantity == "nearly empty"
+    # The caregiver can record "low" as well as "nearly empty"; both are an explicit
+    # statement that stock is running out, so both must reach the refill list.
+    low_stock = quantity in ("low", "nearly empty")
     window_elapsed = (available.age_days or 0) >= refill_window_days
-    if not (nearly_empty or window_elapsed):
+    if not (low_stock or window_elapsed):
         return None
 
     rule = "REFILL_WINDOW_ELAPSED" if window_elapsed else "REFILL_LIKELY_NEEDED_SOON"

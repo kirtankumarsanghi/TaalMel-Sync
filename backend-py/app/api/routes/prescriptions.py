@@ -147,6 +147,20 @@ async def upload_prescription(
     return _to_out(session, prescription)
 
 
+@router.post("/prescriptions/{prescription_id}/ocr", response_model=PrescriptionOut)
+def retry_prescription_ocr(
+    prescription_id: str,
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+    queue: JobQueue = Depends(queue_dep),
+) -> PrescriptionOut:
+    """Re-read a stored page. Used after an OCR outage or an unreadable scan."""
+    prescription = service.rerun_ocr(
+        session, user_id=user_id, prescription_id=prescription_id, queue=queue
+    )
+    return _to_out(session, prescription)
+
+
 @router.get("/prescriptions/{prescription_id}", response_model=PrescriptionOut)
 def get_prescription(
     prescription_id: str, user_id: str = CurrentUserDep, session: Session = SessionDep

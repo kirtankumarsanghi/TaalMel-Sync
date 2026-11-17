@@ -7,7 +7,7 @@ as services. Every one is consent-gated.
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
@@ -19,7 +19,18 @@ from app.engines.state import compute_state
 from app.engines.triggers import check_expiry
 from app.events import store as events
 from app.events.types import ReasonCode
-from app.services import evidence, i18n, photo_verification, speech, tapering
+from app.services import (
+    conditions as conditions_service,
+    dossier,
+    dossier_pdf,
+    evidence,
+    i18n,
+    lab_comparison,
+    photo_verification,
+    speech,
+    tapering,
+    timeline,
+)
 from app.services.speech import SpeechToTextProvider, StubSpeechToText
 
 router = APIRouter()
@@ -334,3 +345,120 @@ def record_expiry(
 
     opened = detect_and_open_cases(session, user_id=user_id, medication_id=medication_id)
     return {"event_id": event.id, "opened_cases": [case.id for case in opened]}
+
+
+# ── Longitudinal history ────────────────────────────────────────────
+
+class ConditionOut(BaseModel):
+    id: str
+    name: str
+    name_raw: str | None
+    status: str
+    confirmed: bool
+    date: str | None = None
+    source_prescription_id: str | None = None
+
+
+class ConditionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=120)
+    onset_date: datetime | None = None
+
+
+class ConditionVerifyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+def _condition_out(condition) -> ConditionOut:
+    return ConditionOut(
+        id=condition.id,
+        name=condition.name,
+        name_raw=condition.name_raw,
+        status=condition.status,
+        confirmed=condition.confirmed,
+        date=condition.onset_date.date().isoformat() if condition.onset_date else None,
+        source_prescription_id=condition.source_prescription_id,
+    )
+
+
+@router.get("/patients/{patient_id}/medication-timeline", response_model=dict)
+def get_medication_timeline(
+    patient_id: str,
+    year: int | None = Query(default=None, ge=1900, le=2100),
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+) -> dict:
+    """Year-by-year history, merged per drug, built from verified prescription lines."""
+    return timeline.medication_timeline(
+        session, user_id=user_id, patient_id=patient_id, year=year
+    )
+
+
+@router.get("/patients/{patient_id}/dossier.pdf")
+def get_dossier_pdf(
+    patient_id: str, user_id: str = CurrentUserDep, session: Session = SessionDep
+) -> Response:
+    """The multi-year record as one printable document."""
+    assembled = dossier.assemble_dossier(session, user_id=user_id, patient_id=patient_id)
+    pdf = dossier_pdf.render_dossier(assembled)
+    filename = f"taalmel-history-{patient_id[:8]}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/patients/{patient_id}/lab-comparison", response_model=dict)
+def get_lab_comparison(
+    patient_id: str, user_id: str = CurrentUserDep, session: Session = SessionDep
+) -> dict:
+    """Each test across dates, compared with its own printed reference range."""
+    return lab_comparison.lab_comparison(session, user_id=user_id, patient_id=patient_id)
+
+
+@router.get("/patients/{patient_id}/conditions", response_model=list[ConditionOut])
+def list_patient_conditions(
+    patient_id: str, user_id: str = CurrentUserDep, session: Session = SessionDep
+) -> list[ConditionOut]:
+    patient = authorize_patient(session, user_id, patient_id)
+    return [
+        _condition_out(condition)
+        for condition in conditions_service.list_conditions(
+            session, user_id=user_id, household_member_id=patient.household_member_id
+        )
+    ]
+
+
+@router.post("/patients/{patient_id}/conditions", response_model=ConditionOut, status_code=201)
+def add_patient_condition(
+    patient_id: str,
+    body: ConditionIn,
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+) -> ConditionOut:
+    """A condition the caregiver states directly, already confirmed."""
+    patient = authorize_patient(session, user_id, patient_id)
+    condition = conditions_service.add_manual_condition(
+        session,
+        user_id=user_id,
+        household_member_id=patient.household_member_id,
+        name=body.name,
+        onset_date=body.onset_date,
+    )
+    return _condition_out(condition)
+
+
+@router.post("/conditions/{condition_id}/verify", response_model=ConditionOut)
+def verify_patient_condition(
+    condition_id: str,
+    body: ConditionVerifyIn,
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+) -> ConditionOut:
+    """Confirm or correct a condition read by OCR. Nothing groups on it before this."""
+    condition = conditions_service.verify_condition(
+        session, user_id=user_id, condition_id=condition_id, name=body.name
+    )
+    return _condition_out(condition)

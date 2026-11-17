@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, FileUp, Package, Send } from "lucide-react";
+import { Activity, Camera, FileUp, Package, Send } from "lucide-react";
 import { api } from "../lib/api";
 import type { QuestionRow } from "../lib/api";
 import { useHousehold } from "../lib/household";
+import CameraCapture from "../components/CameraCapture";
 
 type TimelineRow = {
   date: string;
@@ -13,6 +14,8 @@ type TimelineRow = {
 };
 
 type RefillItem = { medication_id: string; name: string; dose: string | null; reason: string; basis: string };
+
+const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
 export default function Wellness() {
   const { patient } = useHousehold();
@@ -26,6 +29,8 @@ export default function Wellness() {
   const [question, setQuestion] = useState("");
   const [symptom, setSymptom] = useState("");
   const [severity, setSeverity] = useState("ROUTINE");
+  const [labDate, setLabDate] = useState("");
+  const [showLabCamera, setShowLabCamera] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const labRef = useRef<HTMLInputElement>(null);
@@ -54,13 +59,16 @@ export default function Wellness() {
     if (!patient || !file) return;
     setBusy(true);
     try {
-      const result = await api.uploadDocument(patient.household_member_id, file);
+      const result = await api.uploadDocument(patient.household_member_id, file, {
+        prescribed_on: labDate ? new Date(labDate).toISOString() : null,
+      });
       setMessage(result.message);
       await load();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Could not upload the report.");
     } finally {
       setBusy(false);
+      if (labRef.current) labRef.current.value = "";
     }
   }
 
@@ -188,6 +196,36 @@ export default function Wellness() {
             <h2 className="flex items-center gap-2 font-dm text-[16px] font-medium text-ink">
               <FileUp className="h-4 w-4 text-ink/40" /> Lab reports
             </h2>
+
+            <div className="mt-3">
+              <label className="block">
+                <span className="font-inter text-[11.5px] font-medium text-ink/60">
+                  Test / Collection date
+                </span>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={labDate}
+                    max={TODAY_ISO}
+                    onChange={(e) => setLabDate(e.target.value)}
+                    className="h-8 rounded-md border border-ink/15 bg-white px-2.5 font-inter text-[12px] text-ink outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setLabDate(TODAY_ISO)}
+                    className="h-8 rounded-md border border-ink/15 bg-white px-2 font-inter text-[11px] text-ink/65 hover:text-ink"
+                  >
+                    Today
+                  </button>
+                </div>
+              </label>
+              {!labDate && (
+                <p className="mt-1 font-inter text-[11px] text-amber-700">
+                  ⚠️ Without a collection date, test values may appear as &ldquo;undated&rdquo;.
+                </p>
+              )}
+            </div>
+
             <input
               ref={labRef}
               type="file"
@@ -195,15 +233,37 @@ export default function Wellness() {
               className="hidden"
               onChange={(e) => void uploadLab(e.target.files?.[0])}
             />
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => labRef.current?.click()}
-              className="mt-2 rounded-md border border-ink/15 bg-white px-3 py-2 font-inter text-[12.5px] text-ink/75"
-            >
-              Upload a lab report
-            </button>
-            <ul className="mt-2 space-y-1">
+
+            <div className="mt-2.5 flex items-center gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setShowLabCamera(true)}
+                className="flex items-center gap-1.5 rounded-md border border-ink/15 bg-white px-3 py-1.5 font-inter text-[12.5px] text-ink/75 hover:text-ink disabled:opacity-50"
+              >
+                <Camera className="h-3.5 w-3.5" />
+                Take photo
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => labRef.current?.click()}
+                className="flex items-center gap-1.5 rounded-md border border-ink/15 bg-white px-3 py-1.5 font-inter text-[12.5px] text-ink/75 hover:text-ink disabled:opacity-50"
+              >
+                <FileUp className="h-3.5 w-3.5" />
+                Choose file
+              </button>
+            </div>
+
+            {showLabCamera && (
+              <CameraCapture
+                title="Photograph lab report"
+                onCapture={(file) => void uploadLab(file)}
+                onClose={() => setShowLabCamera(false)}
+              />
+            )}
+
+            <ul className="mt-3 space-y-1">
               {labs.map((lab) => (
                 <li key={lab.id} className="font-inter text-[12px] text-ink/60">
                   {lab.captured_on ?? "undated"}: {lab.values.map((v) => `${v.test_name} ${v.value}${v.unit ?? ""}`).join(", ")}

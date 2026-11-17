@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 
 from app.api.deps import CurrentUserDep, SessionDep
 from app.consent import service as consent
-from app.db.models import Household, HouseholdMember, Patient
+from app.db.models import CaregiverAccess, Household, HouseholdMember, Patient, User
 from app.households import service as households
 from app.services import emergency_contacts
 
@@ -45,6 +45,27 @@ class RecordConsentIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     consent_type: str = Field(default="data_access", max_length=40)
     consent_method: str = Field(default="in_app", max_length=40)
+
+
+class GrantAccessByPhoneIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    caregiver_phone: str = Field(min_length=6, max_length=20)
+    # Temporary handoff: access stops working at this time with no manual revoke.
+    expires_at: datetime | None = None
+
+
+class CaregiverAccessOut(BaseModel):
+    id: str
+    patient_id: str | None
+    patient_name: str | None
+    household_member_id: str
+    caregiver_user_id: str
+    caregiver_name: str | None
+    caregiver_phone: str | None
+    status: str
+    consent_recorded: bool
+    expires_at: datetime | None
+    granted_at: datetime
 
 
 class EmergencyContactIn(BaseModel):
@@ -232,6 +253,122 @@ def revoke_consent(
     consent.revoke_consent_as_actor(
         session, acting_user_id=user_id, caregiver_access_id=caregiver_access_id
     )
+
+
+def _phone_digits(value: str | None) -> str:
+    return "".join(character for character in (value or "") if character.isdigit())
+
+
+def _find_user_by_phone(session: Session, phone: str) -> User | None:
+    """Phone is the only handle a family member is likely to know, so match loosely."""
+    digits = _phone_digits(phone)
+    if len(digits) < 6:
+        return None
+    for candidate in session.exec(select(User)).all():
+        if _phone_digits(candidate.phone) == digits:
+            return candidate
+    return None
+
+
+def _access_status(session: Session, access: CaregiverAccess) -> str:
+    if access.revoked_at is not None:
+        return "REVOKED"
+    expires_at = access.expires_at
+    if expires_at is not None:
+        aware = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
+        if aware <= datetime.now(UTC):
+            return "EXPIRED"
+    if not consent.has_active_consent(session, access):
+        return "PENDING"
+    return "ACTIVE"
+
+
+def _access_out(session: Session, access: CaregiverAccess) -> CaregiverAccessOut:
+    caregiver = session.get(User, access.caregiver_user_id)
+    patient = session.exec(
+        select(Patient).where(Patient.household_member_id == access.household_member_id)
+    ).first()
+    member = session.get(HouseholdMember, access.household_member_id)
+    return CaregiverAccessOut(
+        id=access.id,
+        patient_id=patient.id if patient else None,
+        patient_name=member.display_name if member else None,
+        household_member_id=access.household_member_id,
+        caregiver_user_id=access.caregiver_user_id,
+        caregiver_name=caregiver.name if caregiver else None,
+        caregiver_phone=caregiver.phone if caregiver else None,
+        status=_access_status(session, access),
+        consent_recorded=access.consent_recorded,
+        expires_at=access.expires_at,
+        granted_at=access.granted_at,
+    )
+
+
+@router.get("/access/mine", response_model=list[CaregiverAccessOut])
+def my_access(
+    user_id: str = CurrentUserDep, session: Session = SessionDep
+) -> list[CaregiverAccessOut]:
+    """Grants addressed to the signed-in caregiver, so they can accept them."""
+    rows = session.exec(
+        select(CaregiverAccess).where(CaregiverAccess.caregiver_user_id == user_id)
+    ).all()
+    return sorted(
+        (_access_out(session, row) for row in rows),
+        key=lambda row: row.granted_at,
+        reverse=True,
+    )
+
+
+@router.get("/patients/{patient_id}/access", response_model=list[CaregiverAccessOut])
+def list_patient_access(
+    patient_id: str, user_id: str = CurrentUserDep, session: Session = SessionDep
+) -> list[CaregiverAccessOut]:
+    """Who can see this patient. A guest sees only their own row, not other people's."""
+    patient = consent.authorize_patient(session, user_id, patient_id)
+    member = session.get(HouseholdMember, patient.household_member_id)
+    household = session.get(Household, member.household_id) if member else None
+    if member is None or household is None:
+        raise consent.AccessDenied("Patient not found", status_code=404)
+
+    rows = session.exec(
+        select(CaregiverAccess).where(
+            CaregiverAccess.household_member_id == patient.household_member_id
+        )
+    ).all()
+    if household.created_by != user_id:
+        rows = [row for row in rows if row.caregiver_user_id == user_id]
+    return sorted(
+        (_access_out(session, row) for row in rows),
+        key=lambda row: row.granted_at,
+        reverse=True,
+    )
+
+
+@router.post("/patients/{patient_id}/access", response_model=CaregiverAccessOut, status_code=201)
+def grant_patient_access(
+    patient_id: str,
+    body: GrantAccessByPhoneIn,
+    user_id: str = CurrentUserDep,
+    session: Session = SessionDep,
+) -> CaregiverAccessOut:
+    """Invite a family member by phone. They must accept before they can read anything."""
+    patient = consent.authorize_patient(session, user_id, patient_id)
+    caregiver = _find_user_by_phone(session, body.caregiver_phone)
+    if caregiver is None:
+        raise consent.AccessDenied(
+            "No Taalmel account uses this phone number. Ask them to sign up first.",
+            status_code=404,
+        )
+    if caregiver.id == user_id:
+        raise consent.AccessDenied("This is your own account.", status_code=400)
+    access = consent.grant_access(
+        session,
+        granting_user_id=user_id,
+        caregiver_user_id=caregiver.id,
+        household_member_id=patient.household_member_id,
+        expires_at=body.expires_at,
+    )
+    return _access_out(session, access)
 
 
 class HouseholdDetailOut(BaseModel):

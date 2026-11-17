@@ -50,7 +50,7 @@ _NON_MEDICATION_PATTERNS = (
 
 _FORM_WORDS = (
     r"(?:tab|tablet|tabs|cap|capsule|caps|syp|syrup|inj|injection|susp|suspension|"
-    r"drops?|oint|ointment|cream|gel|spray|inhaler|patch|sachet)"
+    r"drops?|oint|ointment|cream|gel|lotion|soap|facewash|spray|inhaler|patch|sachet)"
 )
 
 _STRENGTH = (
@@ -64,12 +64,13 @@ _INSTRUCTION = (
     r"|\b(?:once|twice|thrice|three|four)\s+(?:a\s+)?(?:daily|times)\b"
     r"|\bevery\s+\d+\s*(?:hours?|hrs?|days?)\b"
     r"|\b(?:before|after|with)\s+(?:meals?|food|breakfast|lunch|dinner|milk)\b"
-    r"|\b(?:in\s+the\s+)?(?:morning|evening|night|bedtime)\b"
+    r"|\b(?:in\s+the\s+)?(?:morning|evening|night|bedtime|noon)\b"
+    r"|\b(?:local(?:ly)?|application|apply)\b"
     r"|\bat\s+bedtime\b"
     r"|\b(?:empty\s+stomach|oral|orally|topical|subcutaneous|intravenous|iv|im)\b"
 )
 
-_DURATION = r"\b(?:for\s+)?\d+\s*(?:days?|weeks?|months?|dys?|wks?)\b"
+_DURATION = r"(?:\bx\s*)?(?:for\s+)?\d+\s*(?:days?|weeks?|months?|dys?|wks?)\b"
 
 _QUANTITY = r"\b(?:take|giving|give)\b"
 
@@ -221,10 +222,10 @@ def parse_line(raw: str) -> ParsedLine | None:
     text = re.sub(r"^\s*\d+\s*[.)]\s*", "", text)
 
     form: str | None = None
-    form_match = re.match(rf"^\s*({_FORM_WORDS})\b\.?", text, re.IGNORECASE)
+    form_match = re.search(rf"\b({_FORM_WORDS})\b\.?", text, re.IGNORECASE)
     if form_match:
         form = normalize_dosage_form(form_match.group(1))
-        text = text[form_match.end():].strip()
+        text = (text[: form_match.start()] + " " + text[form_match.end():]).strip()
 
     strength: str | None = None
     strength_match = re.search(_STRENGTH, text, re.IGNORECASE)
@@ -239,9 +240,11 @@ def parse_line(raw: str) -> ParsedLine | None:
     text, take_parts = _strip_repeatedly(text, _QUANTITY)
 
     schedule = normalize_frequency(schedule_parts[0]) if schedule_parts else None
-    extras = " ".join(schedule_parts + duration_parts + take_parts) or None
+    leftover = [part for part in schedule_parts[1:] if part.lower() != (schedule or "").lower()]
+    extras = " ".join(leftover + duration_parts + take_parts) or None
 
     name = re.sub(r"[\s,;:.\-–—/]+", " ", text).strip()
+    name = re.sub(r"\s+[a-zA-Z]$", "", name).strip()
     if not name or not any(ch.isalpha() for ch in name):
         return None
     # A name made only of unit words is a misparse, not a medicine.

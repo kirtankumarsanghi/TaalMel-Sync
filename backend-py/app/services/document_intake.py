@@ -127,6 +127,13 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _utc(value: datetime | None) -> datetime | None:
+    """Date-only input arrives naive; the column requires an aware UTC value."""
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
 def _existing_document(
     session: Session, member_id: str, file_hash: str
 ) -> MedicalDocument | None:
@@ -148,6 +155,8 @@ def intake_document(
     data: bytes,
     mime_type: str,
     filename: str,
+    prescribed_by: str | None = None,
+    prescribed_on: datetime | None = None,
 ) -> DocumentResult:
     _validate(data, mime_type, filename)
     authorize_member(session, user_id, household_member_id)
@@ -212,8 +221,13 @@ def intake_document(
         file_hash=file_hash,
         file_storage_key=storage_key,
         ocr_status="PROCESSING",
+        ocr_error=ocr_error,
         raw_text=raw_text,
-        captured_on=lab_result.captured_on if lab_result is not None else None,
+        captured_on=(
+            lab_result.captured_on
+            if (lab_result is not None and lab_result.captured_on is not None)
+            else _utc(prescribed_on)
+        ),
         uploaded_by_user_id=user_id,
         created_at=now,
         updated_at=now,
@@ -232,6 +246,8 @@ def intake_document(
         if doc_type == "PRESCRIPTION":
             prescription = Prescription(
                 household_member_id=household_member_id,
+                prescribed_by=prescribed_by,
+                prescribed_on=_utc(prescribed_on),
                 file_storage_key=storage_key,
                 original_filename=filename,
                 mime_type=mime_type,
@@ -285,6 +301,15 @@ def intake_document(
                     source=Source.OCR,
                     household_member_id=household_member_id,
                 )
+            from app.services.conditions import sync_conditions_from_text
+
+            sync_conditions_from_text(
+                session,
+                household_member_id=household_member_id,
+                raw_text=raw_text,
+                prescription_id=prescription.id,
+                document_id=document.id,
+            )
             events.append_event(
                 session,
                 event_type=EventType.PRESCRIPTION_OCR_COMPLETED,
@@ -309,7 +334,11 @@ def intake_document(
                 mime_type=mime_type,
                 file_size_bytes=len(data),
                 file_hash=file_hash,
-                captured_on=lab_result.captured_on if lab_result is not None else None,
+                captured_on=(
+            lab_result.captured_on
+            if (lab_result is not None and lab_result.captured_on is not None)
+            else _utc(prescribed_on)
+        ),
                 lab_name=lab_result.lab_name if lab_result is not None else None,
                 ocr_status="COMPLETED" if lab_values else "NEEDS_REVIEW",
                 ocr_raw_text=raw_text,

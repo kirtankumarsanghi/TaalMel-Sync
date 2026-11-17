@@ -186,7 +186,20 @@ def test_empty_lab_text_yields_no_values() -> None:
 # ── Provider selection ──────────────────────────────────────────────
 
 def test_ocr_mode_is_reported_not_guessed() -> None:
-    assert ocr_mode() in {"easyocr", "stub"}
+    """The reported mode must match configuration, never be silently wrong.
+
+    A developer may have a real engine configured in `.env`, so this asserts the mode
+    agrees with the setting rather than assuming no cloud key is present.
+    """
+    from app.config import get_settings
+
+    configured = get_settings().ocr_engine
+    mode = ocr_mode()
+    assert mode in {"easyocr", "stub", "google", "gemini", "trocr"}
+    if configured != "auto":
+        assert mode == configured
+    if configured == "gemini":
+        assert mode == "gemini"
 
 
 def test_forcing_stub_mode_uses_the_stub(monkeypatch) -> None:

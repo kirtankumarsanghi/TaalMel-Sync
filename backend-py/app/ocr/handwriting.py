@@ -49,11 +49,13 @@ def _skip_line(line: str) -> bool:
 def _clean_name(line: str) -> str:
     text = repair_digits(line.strip())
     text = _SERIAL.sub("", text)
+    text = re.sub(r"^\s*\d+\s*[.)\-:]?\s*", "", text)
     text = _FORM_RE.sub(" ", text, count=1)
     text = _STRENGTH_RE.sub(" ", text, count=1)
     text = _FREQ_RE.sub(" ", text)
-    text = re.sub(r"\b(?:x|for)\s*\d+\s*(?:days?|d)\b", " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s+", " ", text).strip(" .,;:-")
+    text = re.sub(r"(?:\bx\s*)?(?:for\s+)?\d+\s*(?:days?|weeks?|months?|d)\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+\bx\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip(" .,;:-xX")
     return text[:120]
 
 

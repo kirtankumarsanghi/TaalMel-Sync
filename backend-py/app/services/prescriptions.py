@@ -101,7 +101,9 @@ def upload_prescription(
     prescription = Prescription(
         household_member_id=household_member_id,
         prescribed_by=prescribed_by,
-        prescribed_on=prescribed_on,
+        prescribed_on=prescribed_on
+        if prescribed_on is None or prescribed_on.tzinfo
+        else prescribed_on.replace(tzinfo=UTC),
         file_storage_key=storage_key,
         original_filename=filename,
         mime_type=mime_type,
@@ -137,7 +139,21 @@ def upload_prescription(
 
     notify_for_event(session, uploaded_event)
 
-    queue.enqueue_ocr(prescription.id)
+    # The file is already stored at this point. A transient OCR outage (a cloud 503, for
+    # example) must not turn the upload into a 500: the row stays, marked FAILED with the
+    # reason, and the client can offer a re-read.
+    try:
+        queue.enqueue_ocr(prescription.id)
+    except Exception as exc:
+        session.expire_all()
+        stored = session.get(Prescription, prescription.id)
+        if stored is not None and stored.ocr_status != "FAILED":
+            stored.ocr_status = "FAILED"
+            stored.ocr_error = str(exc)[:500]
+            stored.updated_at = _now()
+            session.add(stored)
+            session.commit()
+        return session.get(Prescription, prescription.id)
     return prescription
 
 
@@ -197,6 +213,15 @@ def run_ocr_job(
     prescription.updated_at = now
     session.add(prescription)
 
+    from app.services.conditions import sync_conditions_from_text
+
+    sync_conditions_from_text(
+        session,
+        household_member_id=prescription.household_member_id,
+        raw_text=result.raw_text,
+        prescription_id=prescription.id,
+    )
+
     for candidate in result.candidates:
         item = PrescriptionItem(
             prescription_id=prescription.id,
@@ -240,6 +265,41 @@ def run_ocr_job(
 
     notify_for_event(session, completed_event)
     return prescription
+
+
+def rerun_ocr(
+    session: Session, *, user_id: str, prescription_id: str, queue: JobQueue
+) -> Prescription:
+    """Re-read a stored page after OCR failed or was unreadable.
+
+    Re-uploading is blocked by the per-patient hash dedupe, so this is the only way to
+    retry a cloud OCR outage without creating a duplicate record.
+    """
+    prescription = session.get(Prescription, prescription_id)
+    if prescription is None:
+        raise PrescriptionError("Prescription not found", status_code=404)
+    authorize_member(session, user_id, prescription.household_member_id)
+
+    if prescription.verified:
+        raise PrescriptionError(
+            "This prescription is already confirmed; re-reading it would overwrite confirmed lines.",
+            status_code=409,
+        )
+
+    try:
+        queue.enqueue_ocr(prescription_id)
+    except Exception as exc:  # the failure is already stored on the row by run_ocr_job
+        session.expire_all()
+        failed = session.get(Prescription, prescription_id)
+        if failed is not None and failed.ocr_status != "FAILED":
+            failed.ocr_status = "FAILED"
+            failed.ocr_error = str(exc)[:500]
+            failed.updated_at = _now()
+            session.add(failed)
+            session.commit()
+
+    session.expire_all()
+    return session.get(Prescription, prescription_id)
 
 
 @dataclass(frozen=True)

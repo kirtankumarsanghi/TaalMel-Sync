@@ -1,7 +1,7 @@
 # TAALMEL SYNC — Specification & Implementation Status
 
-**Last verified:** 2026-11-14 against `backend-py/`
-**Verification method:** full pytest suite (385 passing cases); Alembic upgrade/downgrade on a fresh database; endpoint list read from the mounted routers; production frontend build (`tsc -b && vite build`); Playwright browser smoke test.
+**Last verified:** 2026-11-17 against `backend-py/`
+**Verification method:** full pytest suite (410 passing cases); Alembic upgrade/downgrade on a fresh database; endpoint list read from the mounted routers; production frontend build (`tsc -b && vite build`); Playwright browser smoke test, plus `scripts/check-history.mjs` for the history screen.
 
 > **This document replaces the earlier spec**, which marked several built features as "planned"
 > and marked three things "working" that are not (real OCR, Celery, structlog). Every status
@@ -175,6 +175,19 @@ Legend: ✅ WORKING (built + tested) · 🔶 PARTIAL · 🔲 NOT BUILT · ⏳ DE
 - **Doctor login/dashboard** — optional doctor account implemented; public token links remain the default and still require no account.
 - **Pharmacy ordering API** — provider interface implemented with a local mock; set `TAALMEL_PHARMACY_API_URL` for an HTTP provider.
 
+### 4.7 Longitudinal history
+
+| Feature | Status | Reality |
+|---|---|---|
+| Medication timeline | ✅ | Derived from human-verified prescription lines only, merged per drug (brand → generic when the dictionary agrees). Groups by year; undated items are listed as "date not recorded", never guessed into a year. `GET /api/patients/{id}/medication-timeline?year=` |
+| Dose-change episodes | ✅ | Consecutive entries with the same dose and frequency collapse into one episode; a dose change starts a new episode with `previous_dose` and `dose_changed`, and every episode cites its source prescription |
+| Diagnosis capture | ✅ | Lines explicitly labelled `Dx`, `D/X`, or `Diagnosis` are stored as **unconfirmed** conditions with the raw wording kept. Nothing groups on a condition before a person confirms it. Unlike the rest of the flow, a stored condition can also be added by hand |
+| Bulk archive import | ✅ | `POST /api/patients/{id}/documents/bulk` takes many files with one visit date per file (a date is required), isolates a bad file so the batch survives, and still requires per-prescription confirmation |
+| Frontend History screen | ✅ | `/app/history`: year-by-year visits, dose-change log, condition review and correction, lab comparison table, archive importer, and PDF download. Verified in a real browser (10/10 checks, no console errors) |
+| Dossier PDF | ✅ | `GET /api/patients/{id}/dossier.pdf`: conditions, medicines by year with the source file on every visit, dose-change log, lab comparison against printed ranges, source list, and an explicit "records that could not be read" section |
+| Condition linking | ✅ | A confirmed diagnosis is linked to the medicines written on the same prescription page. Every link states that this is co-occurrence, not a claim that a medicine treated the condition |
+| Lab comparison | ✅ | Same test across dates, compared with the reference range printed on its own report. Different units are separate series; qualitative results are `NOT_COMPARABLE`. No clinical judgement |
+
 ---
 
 ## 5. API REFERENCE — ACTUAL ENDPOINTS
@@ -188,7 +201,9 @@ Legend: ✅ WORKING (built + tested) · 🔶 PARTIAL · 🔲 NOT BUILT · ⏳ DE
 
 **Access & consent** — `POST /api/access` · `POST /api/households/{id}/access` · `POST /api/access/{id}/consent` · `POST /api/households/{id}/access/{id}/consent` · `POST /api/access/{id}/revoke` · `POST /api/households/{id}/temporary-access` · `DELETE /api/households/{id}/temporary-access/{id}` · emergency contacts
 
-**Prescriptions** — `POST /api/prescriptions/upload` (optional `prescribed_by`, `prescribed_on`) · `GET /api/prescriptions/{id}` · `PATCH /api/prescriptions/{id}` · `POST /api/prescriptions/{id}/verify` · `GET /api/patients/{id}/prescriptions`
+**Prescriptions** — `POST /api/prescriptions/upload` (optional `prescribed_by`, `prescribed_on`) · `GET /api/prescriptions/{id}` · `PATCH /api/prescriptions/{id}` · `POST /api/prescriptions/{id}/verify` · `POST /api/prescriptions/{id}/ocr` (re-read a failed page) · `GET /api/patients/{id}/prescriptions`
+
+**History** — `GET /api/patients/{id}/medication-timeline` (`?year=`) · `GET /api/patients/{id}/conditions` · `POST /api/patients/{id}/conditions` · `POST /api/conditions/{id}/verify` · `GET /api/patients/{id}/lab-comparison` · `GET /api/patients/{id}/dossier.pdf` · `POST /api/patients/{id}/documents/bulk`
 
 **Medications & normalization** — `GET /api/medications` · `/needs-review` · `POST /api/medications/normalize-preview` · `POST /api/medications/{id}/verify-normalization`
 

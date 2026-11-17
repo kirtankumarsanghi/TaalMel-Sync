@@ -38,6 +38,9 @@ def get_access_row(session: Session, user_id: str, household_member_id: str) -> 
 
 
 def has_active_consent(session: Session, access: CaregiverAccess) -> bool:
+    if access.revoked_at is not None:
+        # A revoke is permanent for this grant; only a fresh grant reopens it.
+        return False
     if access.expires_at is not None and _as_utc(access.expires_at) <= _now():
         # Temporary access has ended. It grants nothing, and nothing needs revoking.
         return False
@@ -101,6 +104,26 @@ def grant_access(
 
     existing = get_access_row(session, caregiver_user_id, household_member_id)
     if existing is not None:
+        # Re-granting after a revoke or an ended handoff must produce a usable row.
+        # Returning the old one would report success while granting nothing, because its
+        # window has already passed. Consent is reset so the caregiver records it again.
+        existing.granted_at = _now()
+        existing.expires_at = expires_at
+        existing.revoked_at = None
+        existing.consent_recorded = False
+        existing.updated_at = _now()
+        session.add(existing)
+        audit.log(
+            session,
+            audit.AuditAction.ACCESS_GRANTED,
+            user_id=granting_user_id,
+            details={
+                "caregiver_user_id": caregiver_user_id,
+                "household_member_id": household_member_id,
+                "regranted": True,
+            },
+        )
+        session.commit()
         return existing
 
     access = CaregiverAccess(
@@ -189,6 +212,11 @@ def record_consent(
     access = session.get(CaregiverAccess, caregiver_access_id)
     if access is None:
         raise AccessDenied("Caregiver access record not found", status_code=404)
+    if access.revoked_at is not None:
+        raise AccessDenied(
+            "This access was revoked by the household. It must be granted again.",
+            status_code=403,
+        )
 
     now = _now()
     consent = session.exec(
@@ -218,20 +246,27 @@ def record_consent(
 
 
 def revoke_consent(session: Session, *, caregiver_access_id: str) -> None:
+    access = session.get(CaregiverAccess, caregiver_access_id)
+    if access is None:
+        raise AccessDenied("Caregiver access record not found", status_code=404)
+
     consent = session.exec(
         select(Consent).where(Consent.caregiver_access_id == caregiver_access_id)
     ).first()
-    if consent is None:
-        raise AccessDenied("Consent record not found", status_code=404)
 
     now = _now()
-    consent.revoked_at = now
-    consent.updated_at = now
-    session.add(consent)
+    if consent is not None:
+        consent.revoked_at = now
+        consent.updated_at = now
+        session.add(consent)
 
-    access = session.get(CaregiverAccess, caregiver_access_id)
-    if access is not None:
-        access.consent_recorded = False
-        access.updated_at = now
-        session.add(access)
+    # A handoff can be revoked before the caregiver has recorded consent, so the
+    # access row itself must stop granting anything. Ending a temporary window also
+    # stops the caregiver re-recording consent to reopen a handoff that was withdrawn.
+    access.consent_recorded = False
+    access.revoked_at = now
+    if access.expires_at is not None and _as_utc(access.expires_at) > now:
+        access.expires_at = now
+    access.updated_at = now
+    session.add(access)
     session.flush()

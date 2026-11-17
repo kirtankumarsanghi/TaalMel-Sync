@@ -13,6 +13,8 @@ import DoctorExport, { Safety } from "./pages/DoctorExport";
 import DoctorView from "./pages/DoctorView";
 import DoctorDashboard from "./pages/DoctorDashboard";
 import Wellness from "./pages/Wellness";
+import HistoryPage from "./pages/History";
+import Caregivers from "./pages/Caregivers";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();
@@ -63,9 +65,11 @@ export default function App() {
               <Route path="medicines" element={<Medicines />} />
               <Route path="cases" element={<Cases />} />
               <Route path="cases/:caseId" element={<CaseDetail />} />
+              <Route path="history" element={<HistoryPage />} />
               <Route path="export" element={<DoctorExport />} />
               <Route path="safety" element={<Safety />} />
               <Route path="wellness" element={<Wellness />} />
+              <Route path="caregivers" element={<Caregivers />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

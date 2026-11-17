@@ -37,7 +37,7 @@ The original TypeScript prototype was removed; the Python backend is the source 
 
 ## Current status
 
-**Backend:** 385 passing tests. Alembic migrations are reversible and tested against the
+**Backend:** 410 passing tests. Alembic migrations are reversible and tested against the
 model schema.
 
 **Frontend:** production build passes. A real-browser Playwright flow covers signup,
@@ -69,6 +69,16 @@ accessibility toggles: **16/16 checks pass with no console errors**.
 - Pharmacy refill ordering through a provider interface; local mock by default.
 - Unified document intake for prescriptions, lab reports, discharge summaries, invoices,
   and unknown pages.
+- Longitudinal history: verified prescription lines are merged per drug across years,
+  with dated dose changes and the source document on every episode. Diagnoses labelled
+  "Dx"/"Diagnosis" are captured, held unconfirmed until a person confirms them, and can
+  be added by hand.
+- Lab comparison: each test tracked across reports and compared with the reference range
+  printed on its own report. Different units stay separate; qualitative results are not
+  compared. No clinical judgement is produced.
+- Multi-year dossier: one PDF with conditions, medicines by year, dose-change log, lab
+  comparison, sources, and the records that could not be read.
+- Bulk archive import: many files at once, one visit date each, with per-file results.
 
 ### Partial / external
 
@@ -302,6 +312,7 @@ cd frontend
 npm run build
 node scripts/check-ui.mjs
 node scripts/check-features.mjs
+node scripts/check-history.mjs
 ```
 
 The feature check drives the real app: signup, consent, onboarding, upload, OCR,
@@ -325,6 +336,7 @@ The public doctor route is token-only.
 - **Doctor export:** JSON/PDF/HTML, link, QR, public token view, optional doctor dashboard
 - **Lab:** upload, correlation, patient-level list/timeline
 - **Companion:** today, changes, questions, completeness, summary, refill list/order
+- **History:** medication timeline by year, dose-change episodes, conditions (list/add/confirm)
 - **Voice/symptoms/wellness:** transcript or audio report, symptom connector, timeline
 - **i18n:** language list, catalogue, single string
 

@@ -49,6 +49,8 @@ type Options = {
   signal?: AbortSignal;
   // Evidence writes are safe to queue: the server dedupes them by idempotency key.
   offlineQueue?: boolean;
+  // A PDF or other binary response is read as a blob instead of JSON.
+  responseType?: "json" | "blob";
 };
 
 type QueuedWrite = {
@@ -162,6 +164,7 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
     idempotencyKey,
     signal,
     offlineQueue = false,
+    responseType = "json",
   } = options;
 
   if (offlineQueue && typeof navigator !== "undefined" && !navigator.onLine) {
@@ -221,6 +224,7 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
   }
 
   if (response.status === 204) return undefined as T;
+  if (responseType === "blob") return (await response.blob()) as T;
   return (await response.json()) as T;
 }
 
@@ -235,6 +239,26 @@ export type Tokens = {
   user: User;
 };
 
+export type CaregiverAccess = {
+  id: string;
+  patient_id: string | null;
+  patient_name: string | null;
+  household_member_id: string;
+  caregiver_user_id: string;
+  caregiver_name: string | null;
+  caregiver_phone: string | null;
+  status: "ACTIVE" | "PENDING" | "EXPIRED" | "REVOKED";
+  consent_recorded: boolean;
+  expires_at: string | null;
+  granted_at: string;
+};
+
+export type EmergencyContact = {
+  id: string;
+  user_id: string;
+  relationship: string | null;
+};
+
 export type Patient = {
   patient_id: string;
   household_member_id: string;
@@ -246,6 +270,120 @@ export type Patient = {
 export type CreatedHousehold = {
   household: { id: string; name: string };
   patient: Patient;
+};
+
+export type ConditionRow = {
+  id: string;
+  name: string;
+  name_raw: string | null;
+  confirmed: boolean;
+  status: string;
+  date: string | null;
+  source_prescription_id: string | null;
+};
+
+export type TimelineEpisode = {
+  start: string | null;
+  end: string | null;
+  dose: string | null;
+  frequency: string | null;
+  previous_dose: string | null;
+  dose_changed: boolean;
+  sources: {
+    prescription_id: string;
+    filename: string;
+    prescriber: string | null;
+    date: string | null;
+  }[];
+};
+
+export type TimelineMedication = {
+  generic: string;
+  written_names: string[];
+  prescription_count: number;
+  episodes: TimelineEpisode[];
+};
+
+export type TimelineVisit = {
+  date: string | null;
+  prescriber: string | null;
+  prescription_id: string | null;
+  filename: string | null;
+  conditions: {
+    id: string;
+    name: string;
+    name_raw: string | null;
+    confirmed: boolean;
+    status: string;
+  }[];
+  medicines: {
+    name: string;
+    written_name: string;
+    dose: string | null;
+    frequency: string | null;
+  }[];
+};
+
+export type Timeline = {
+  patient_id: string;
+  year_filter: number | null;
+  years: { year: string; visits: TimelineVisit[] }[];
+  medications: TimelineMedication[];
+  conditions: ConditionRow[];
+  unconfirmed_conditions: number;
+  condition_links: {
+    condition: { id: string; name: string; confirmed: boolean };
+    date: string | null;
+    prescription_id: string | null;
+    medicines: { name: string; written_name: string; dose: string | null; frequency: string | null }[];
+    basis: string;
+  }[];
+  note: string;
+};
+
+export type LabPoint = {
+  date: string;
+  value_raw: string;
+  value: number | null;
+  range_low: number | null;
+  range_high: number | null;
+  status: string;
+};
+
+export type LabTest = {
+  test_name: string;
+  unit: string | null;
+  latest_value: string | null;
+  latest_date: string | null;
+  latest_status: string;
+  earliest_value: string | null;
+  earliest_date: string | null;
+  change: number | null;
+  trend: string | null;
+  comparable_points: number;
+  points: LabPoint[];
+};
+
+export type LabComparison = {
+  patient_id: string;
+  tests: LabTest[];
+  summary: { above: number; below: number; within: number };
+  note: string;
+};
+
+export type BulkImportResult = {
+  imported: number;
+  failed: number;
+  items: {
+    filename: string;
+    ok: boolean;
+    document_id: string | null;
+    document_type: string | null;
+    prescription_id: string | null;
+    item_count: number;
+    message: string;
+    error: string | null;
+  }[];
 };
 
 export type DimensionState = {
@@ -427,6 +565,9 @@ export const api = {
 
   getPrescription: (prescriptionId: string) =>
     request<Prescription>(`/api/prescriptions/${prescriptionId}`),
+
+  retryPrescriptionOcr: (prescriptionId: string) =>
+    request<Prescription>(`/api/prescriptions/${prescriptionId}/ocr`, { method: "POST" }),
 
   summary: (memberId: string) => request<Summary>(`/api/households/${memberId}/summary`),
 
@@ -699,9 +840,16 @@ export const api = {
     );
   },
 
-  uploadDocument: (memberId: string, file: File) => {
+  uploadDocument: (
+    memberId: string,
+    file: File,
+    options?: { prescribed_on?: string | null; prescribed_by?: string | null },
+  ) => {
     const form = new FormData();
     form.append("file", file);
+    const params = new URLSearchParams({ household_member_id: memberId });
+    if (options?.prescribed_by) params.set("prescribed_by", options.prescribed_by);
+    if (options?.prescribed_on) params.set("prescribed_on", options.prescribed_on);
     return request<{
       document_id: string;
       document_type: "PRESCRIPTION" | "LAB_REPORT" | "DISCHARGE_SUMMARY" | "INVOICE" | "OTHER";
@@ -712,7 +860,7 @@ export const api = {
       value_count: number;
       message: string;
       raw_text_preview: string;
-    }>(`/api/documents/upload?household_member_id=${encodeURIComponent(memberId)}`, {
+    }>(`/api/documents/upload?${params.toString()}`, {
       method: "POST",
       form,
     });
@@ -745,4 +893,91 @@ export const api = {
       `/api/prescriptions/${prescriptionId}/verify`,
       { method: "POST", body: { items } },
     ),
+
+  medicationTimeline: (patientId: string, year?: number) =>
+    request<Timeline>(
+      `/api/patients/${patientId}/medication-timeline${year ? `?year=${year}` : ""}`,
+    ),
+
+  conditions: (patientId: string) =>
+    request<ConditionRow[]>(`/api/patients/${patientId}/conditions`),
+
+  verifyCondition: (conditionId: string, name?: string) =>
+    request<ConditionRow>(`/api/conditions/${conditionId}/verify`, {
+      method: "POST",
+      body: { name: name ?? null },
+    }),
+
+  addCondition: (patientId: string, name: string, onsetDate?: string | null) =>
+    request<ConditionRow>(`/api/patients/${patientId}/conditions`, {
+      method: "POST",
+      body: { name, onset_date: onsetDate ?? null },
+    }),
+
+  labComparison: (patientId: string) =>
+    request<LabComparison>(`/api/patients/${patientId}/lab-comparison`),
+
+  downloadDossier: (patientId: string) =>
+    request<Blob>(`/api/patients/${patientId}/dossier.pdf`, { responseType: "blob" }),
+
+  bulkImport: (
+    patientId: string,
+    entries: { file: File; date: string }[],
+    prescribedBy?: string | null,
+  ) => {
+    const form = new FormData();
+    for (const entry of entries) {
+      form.append("files", entry.file, entry.file.name);
+    }
+    form.append("visit_dates", JSON.stringify(entries.map((entry) => entry.date)));
+    if (prescribedBy) form.append("prescribed_by", prescribedBy);
+    return request<BulkImportResult>(`/api/patients/${patientId}/documents/bulk`, {
+      method: "POST",
+      form,
+    });
+  },
+
+  patientAccess: (patientId: string) =>
+    request<CaregiverAccess[]>(`/api/patients/${patientId}/access`),
+
+  grantAccess: (
+    patientId: string,
+    caregiverPhone: string,
+    expiresAt?: string | null,
+  ) =>
+    request<CaregiverAccess>(`/api/patients/${patientId}/access`, {
+      method: "POST",
+      body: { caregiver_phone: caregiverPhone, expires_at: expiresAt ?? null },
+    }),
+
+  myAccess: () => request<CaregiverAccess[]>("/api/access/mine"),
+
+  consentAccess: (
+    accessId: string,
+    consentType = "caregiver_onboarding",
+    consentMethod = "app",
+  ) =>
+    request<{ id: string }>(`/api/access/${accessId}/consent`, {
+      method: "POST",
+      body: { consent_type: consentType, consent_method: consentMethod },
+    }),
+
+  revokeAccess: (accessId: string) =>
+    request<void>(`/api/access/${accessId}/revoke`, {
+      method: "POST",
+    }),
+
+  emergencyContacts: (memberId: string) =>
+    request<EmergencyContact[]>(`/api/households/${memberId}/emergency-contacts`),
+
+  addEmergencyContact: (memberId: string, userId: string, relationship?: string | null) =>
+    request<EmergencyContact>(`/api/households/${memberId}/emergency-contacts`, {
+      method: "POST",
+      body: { user_id: userId, relationship: relationship ?? null },
+    }),
+
+  removeEmergencyContact: (memberId: string, contactId: string) =>
+    request<void>(`/api/households/${memberId}/emergency-contacts/${contactId}`, {
+      method: "DELETE",
+    }),
 };
